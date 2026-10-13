@@ -1,45 +1,60 @@
 
 import pyautogui
 
+from holocontrol.application.services.click_controller import ClickController
 from holocontrol.ports.system_actions.action_executor import ActionExecutor
-
+from holocontrol.domain.value_objects.control_state import ControlState
 
 class WindowsActionExecutor(ActionExecutor):
-    """Implementa acciones del ratón para Windows."""
+    """Implementa acciones controladas del ratón para Windows."""
 
     def __init__(self, click_cooldown: float = 0.4):
         if click_cooldown < 0:
             raise ValueError("El tiempo entre clics no puede ser negativo.")
 
-        self._enabled = False
+        self._state = ControlState.STOPPED
         self._hand_detected = False
         self._click_cooldown = click_cooldown
         self._last_click_time = float("-inf")
 
-        # Mover el ratón a la esquina superior izquierda
-        # activa el mecanismo de seguridad de PyAutoGUI.
+        # Cada tipo de clic tiene su propio control de gesto.
+        self._left_click_controller = ClickController()
+        self._right_click_controller = ClickController()
+
+        # Mecanismo de seguridad de PyAutoGUI.
         pyautogui.FAILSAFE = True
 
     def activate(self) -> None:
-        """Permite ejecutar acciones cuando se detecta una mano."""
-        self._enabled = True
+        """Activa el control; requiere detectar una mano."""
+        self._state = ControlState.ACTIVE
 
     def pause(self) -> None:
-        """Bloquea temporalmente todas las acciones."""
-        self._enabled = False
+        """Pausa temporalmente el control."""
+        self._state = ControlState.PAUSED
+        self._reset_click_gestures()
 
     def stop(self) -> None:
-        """Detiene el control hasta una activación posterior."""
-        self._enabled = False
+        """Detiene el control y elimina la detección de mano."""
+        self._state = ControlState.STOPPED
         self._hand_detected = False
+        self._reset_click_gestures()
+        self._last_click_time = float("-inf")
 
     def set_hand_detected(self, detected: bool) -> None:
-        """Actualiza si el sistema de visión detecta una mano."""
+        """Actualiza la detección de la mano."""
         self._hand_detected = detected
 
+        if not detected:
+            self._reset_click_gestures()
+            self._last_click_time = float("-inf")
+
+    def _reset_click_gestures(self) -> None:
+        self._left_click_controller.reset()
+        self._right_click_controller.reset()
+
     def _ensure_allowed(self) -> None:
-        if not self._enabled:
-            raise RuntimeError("El control está pausado o detenido.")
+        if self._state is not ControlState.ACTIVE:
+            raise RuntimeError("El control no está activo.")
 
         if not self._hand_detected:
             raise RuntimeError("No se detecta una mano.")
@@ -55,23 +70,48 @@ class WindowsActionExecutor(ActionExecutor):
         pyautogui.moveTo(x, y, duration=0)
 
     def left_click(self) -> None:
+        """Ejecuta un clic izquierdo autorizado."""
         self._ensure_allowed()
-        self._click()
+        self._click(button="left")
 
     def right_click(self) -> None:
+        """Ejecuta un clic derecho autorizado."""
         self._ensure_allowed()
         self._click(button="right")
 
-    def _click(self, button: str = "left") -> None:
+    
+    def handle_left_click_gesture(self, detected: bool) -> None:
+        """Ejecuta un clic por cada nuevo gesto izquierdo."""
+        self._ensure_allowed()
+
+        if self._left_click_controller.should_click(detected):
+            self._click(button="left", new_gesture=True)
+
+    def handle_right_click_gesture(self, detected: bool) -> None:
+        """Ejecuta un clic por cada nuevo gesto derecho."""
+        self._ensure_allowed()
+
+        if self._right_click_controller.should_click(detected):
+            self._click(button="right", new_gesture=True)
+
+    def _click(
+        self,
+        button: str = "left",
+        new_gesture: bool = False,
+    ) -> None:
         import time
 
         now = time.monotonic()
 
-        if now - self._last_click_time < self._click_cooldown:
+        if (
+            not new_gesture
+            and now - self._last_click_time < self._click_cooldown
+        ):
             return
 
         pyautogui.click(button=button)
         self._last_click_time = now
+
 
     def scroll(self, amount: int) -> None:
         self._ensure_allowed()
