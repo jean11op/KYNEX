@@ -1,6 +1,5 @@
 from dataclasses import dataclass
-from holocontrol.domain.value_objects.estado_control import ControlState as EstadoControl
-
+from holocontrol.domain.value_objects.estado_control import EstadoControl
 
 @dataclass(frozen=True)
 class EstadoActualControl:

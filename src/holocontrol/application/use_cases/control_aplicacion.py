@@ -12,7 +12,7 @@ from holocontrol.domain.entities import (
 from holocontrol.domain.errores import ErrorConflicto, ErrorControl, ErrorDominio, ErrorNoEncontrado
 from holocontrol.domain.rules.catalogo import ACCIONES, GESTOS, asignaciones_predeterminadas
 from holocontrol.domain.rules.validacion import validar_entero, validar_texto
-from holocontrol.domain.value_objects.estado_control import ControlState as EstadoControl
+from holocontrol.domain.value_objects.estado_control import EstadoControl
 from holocontrol.ports.repositories.repositorio_perfil import RepositorioPerfiles
 from holocontrol.ports.system_actions.ejecutor_control import EjecutorControl
 
