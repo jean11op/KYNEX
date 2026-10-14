@@ -2,17 +2,17 @@
 import pyautogui
 
 from holocontrol.application.services.controlador_click import ClickController
-from holocontrol.ports.system_actions.ejecutor_control import ActionExecutor
-from holocontrol.domain.value_objects.estado_control import ControlState
+from holocontrol.ports.system_actions.ejecutor_control import EjecutorControl
+from holocontrol.domain.value_objects.estado_control import EstadoControl
 
-class WindowsActionExecutor(ActionExecutor):
+class WindowsActionExecutor(EjecutorControl):
     """Implementa acciones controladas del ratón para Windows."""
 
     def __init__(self, click_cooldown: float = 0.4):
         if click_cooldown < 0:
             raise ValueError("El tiempo entre clics no puede ser negativo.")
 
-        self._state = ControlState.STOPPED
+        self._state = EstadoControl.STOPPED
         self._hand_detected = False
         self._click_cooldown = click_cooldown
         self._last_click_time = float("-inf")
@@ -26,16 +26,16 @@ class WindowsActionExecutor(ActionExecutor):
 
     def activate(self) -> None:
         """Activa el control; requiere detectar una mano."""
-        self._state = ControlState.ACTIVE
+        self._state = EstadoControl.ACTIVE
 
     def pause(self) -> None:
         """Pausa temporalmente el control."""
-        self._state = ControlState.PAUSED
+        self._state = EstadoControl.PAUSED
         self._reset_click_gestures()
 
     def stop(self) -> None:
         """Detiene el control y elimina la detección de mano."""
-        self._state = ControlState.STOPPED
+        self._state = EstadoControl.STOPPED
         self._hand_detected = False
         self._reset_click_gestures()
         self._last_click_time = float("-inf")
@@ -49,11 +49,12 @@ class WindowsActionExecutor(ActionExecutor):
             self._last_click_time = float("-inf")
 
     def _reset_click_gestures(self) -> None:
-        self._left_click_controller.reset()
-        self._right_click_controller.reset()
+        
+        self._left_click_controller.resetear
+        self._right_click_controller.resetear
 
     def _ensure_allowed(self) -> None:
-        if self._state is not ControlState.ACTIVE:
+        if self._state is not EstadoControl.ACTIVE:
             raise RuntimeError("El control no está activo.")
 
         if not self._hand_detected:
@@ -84,14 +85,14 @@ class WindowsActionExecutor(ActionExecutor):
         """Ejecuta un clic por cada nuevo gesto izquierdo."""
         self._ensure_allowed()
 
-        if self._left_click_controller.should_click(detected):
+        if self._left_click_controller.deberia_click(detected):
             self._click(button="left", new_gesture=True)
 
     def handle_right_click_gesture(self, detected: bool) -> None:
         """Ejecuta un clic por cada nuevo gesto derecho."""
         self._ensure_allowed()
 
-        if self._right_click_controller.should_click(detected):
+        if self._right_click_controller.deveria_click(detected):
             self._click(button="right", new_gesture=True)
 
     def _click(
