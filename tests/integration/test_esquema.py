@@ -110,18 +110,6 @@ def test_impide_asignar_gesto_de_otro_perfil(base):
         )
         conexion.execute(
             """
-            INSERT INTO TipoAccion (id_tipo_accion, nombre)
-            VALUES ('clic_izquierdo', 'Clic izquierdo')
-            """
-        )
-        conexion.execute(
-            """
-            INSERT INTO Accion (id_accion, nombre, id_tipo_accion)
-            VALUES ('clic_izquierdo', 'Clic izquierdo', 'clic_izquierdo')
-            """
-        )
-        conexion.execute(
-            """
             INSERT INTO Gesto (id_gesto, id_perfil, nombre)
             VALUES ('gesto-a', 'perfil-a', 'Gesto personal')
             """

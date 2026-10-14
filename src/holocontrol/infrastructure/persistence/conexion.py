@@ -11,15 +11,25 @@ class BaseDatos:
         self.ruta = Path(ruta).expanduser().resolve()
 
     def inicializar(self) -> None:
-        """Crea las tablas sin borrar los registros existentes."""
-        archivo = Path(__file__).with_name("esquema.sql")
-        esquema = archivo.read_text(encoding="utf-8")
+        """Crea las tablas y carga los catálogos iniciales."""
+        carpeta = Path(__file__).parent
+
+        esquema = (carpeta / "esquema.sql").read_text(
+            encoding="utf-8"
+        )
+        catalogos = (carpeta / "catalogos.sql").read_text(
+            encoding="utf-8"
+        )
 
         conexion = self.conectar()
 
         try:
             conexion.executescript(
-                "BEGIN;\n" + esquema + "\nCOMMIT;"
+                "BEGIN;\n"
+                + esquema
+                + "\n"
+                + catalogos
+                + "\nCOMMIT;"
             )
         except BaseException:
             conexion.rollback()
