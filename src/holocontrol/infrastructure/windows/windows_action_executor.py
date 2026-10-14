@@ -1,20 +1,32 @@
 
+import math
+import time
+from collections.abc import Callable
+
 import pyautogui
 
 from holocontrol.application.services.click_controller import ClickController
-from holocontrol.ports.system_actions.action_executor import ActionExecutor
 from holocontrol.domain.value_objects.control_state import ControlState
+from holocontrol.ports.system_actions.action_executor import ActionExecutor
+
 
 class WindowsActionExecutor(ActionExecutor):
     """Implementa acciones controladas del ratón para Windows."""
 
-    def __init__(self, click_cooldown: float = 0.4):
-        if click_cooldown < 0:
-            raise ValueError("El tiempo entre clics no puede ser negativo.")
+    def __init__(
+        self,
+        click_cooldown: float = 0.4,
+        clock: Callable[[], float] = time.monotonic,
+    ):
+        if not math.isfinite(click_cooldown) or click_cooldown < 0:
+            raise ValueError("El tiempo entre clics debe ser finito y no negativo.")
+        if not callable(clock):
+            raise TypeError("clock debe ser una función que devuelva el tiempo monotónico.")
 
         self._state = ControlState.STOPPED
         self._hand_detected = False
         self._click_cooldown = click_cooldown
+        self._clock = clock
         self._last_click_time = float("-inf")
 
         # Cada tipo de clic tiene su propio control de gesto.
@@ -63,6 +75,8 @@ class WindowsActionExecutor(ActionExecutor):
         self._ensure_allowed()
 
         screen_width, screen_height = pyautogui.size()
+        if screen_width <= 0 or screen_height <= 0:
+            raise RuntimeError("PyAutoGUI devolvió dimensiones de pantalla inválidas.")
 
         x = max(0, min(x, screen_width - 1))
         y = max(0, min(y, screen_height - 1))
@@ -85,28 +99,19 @@ class WindowsActionExecutor(ActionExecutor):
         self._ensure_allowed()
 
         if self._left_click_controller.should_click(detected):
-            self._click(button="left", new_gesture=True)
+            self._click(button="left")
 
     def handle_right_click_gesture(self, detected: bool) -> None:
         """Ejecuta un clic por cada nuevo gesto derecho."""
         self._ensure_allowed()
 
         if self._right_click_controller.should_click(detected):
-            self._click(button="right", new_gesture=True)
+            self._click(button="right")
 
-    def _click(
-        self,
-        button: str = "left",
-        new_gesture: bool = False,
-    ) -> None:
-        import time
+    def _click(self, button: str = "left") -> None:
+        now = self._clock()
 
-        now = time.monotonic()
-
-        if (
-            not new_gesture
-            and now - self._last_click_time < self._click_cooldown
-        ):
+        if now - self._last_click_time < self._click_cooldown:
             return
 
         pyautogui.click(button=button)
