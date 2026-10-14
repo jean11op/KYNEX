@@ -1,11 +1,11 @@
 import unittest
 from dataclasses import replace
 from holocontrol.application.use_cases import AplicacionControl
-from holocontrol.application.dto.recognition import Reconocimiento
+from holocontrol.application.dto.reconocimiento import Reconocimiento
 from holocontrol.domain.entities import Calibracion, Mano, Configuracion, AsignacionGesto
-from holocontrol.domain.errors import ErrorConflicto, ErrorControl, ErrorDominio, ErrorNoEncontrado
-from holocontrol.domain.value_objects.control_state import ControlState as EstadoControl
-from tests.support import RepositorioPerfilesMemoria, EjecutorRegistro, RelojSimulado
+from holocontrol.domain.errores import ErrorConflicto, ErrorControl, ErrorDominio, ErrorNoEncontrado
+from holocontrol.domain.value_objects.estado_control import ControlState as EstadoControl
+from tests.soporte import RepositorioPerfilesMemoria, EjecutorRegistro, RelojSimulado
 
 
 class PruebasAplicacion(unittest.TestCase):

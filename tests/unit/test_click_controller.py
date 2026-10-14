@@ -1,5 +1,5 @@
 
-from holocontrol.application.services.click_controller import ClickController
+from holocontrol.application.services.controllador_click import ClickController
 
 
 def test_click_only_once_while_gesture_is_held():

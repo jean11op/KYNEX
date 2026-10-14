@@ -3,8 +3,8 @@ from dataclasses import FrozenInstanceError
 from holocontrol.domain.entities import (
     Accion, TipoAccion, Calibracion, Gesto, AsignacionGesto, Mano, Perfil, Configuracion,
 )
-from holocontrol.domain.errors import ErrorDominio
-from holocontrol.application.dto.recognition import Reconocimiento
+from holocontrol.domain.errores import ErrorDominio
+from holocontrol.application.dto.reconocimiento import Reconocimiento
 
 
 class PruebasDominio(unittest.TestCase):

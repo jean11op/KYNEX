@@ -6,8 +6,7 @@ import pytest
 from holocontrol.infrastructure.windows.windows_action_executor import (
     WindowsActionExecutor,
 )
-from holocontrol.domain.value_objects.control_state import ControlState
-
+from holocontrol.domain.value_objects.estado_control import EstadoControl
 
 def create_active_executor():
     executor = WindowsActionExecutor()
@@ -118,7 +117,7 @@ def test_hand_loss_resets_click_gesture():
 def test_executor_starts_stopped():
     executor = WindowsActionExecutor()
 
-    assert executor._state is ControlState.STOPPED
+    assert executor._state is EstadoControl.STOPPED
 
 
 def test_activate_without_hand_does_not_allow_actions():
@@ -134,7 +133,7 @@ def test_pause_changes_state():
 
     executor.pause()
 
-    assert executor._state is ControlState.PAUSED
+    assert executor._state is EstadoControl.PAUSED
 
 
 def test_stop_changes_state_and_loses_hand():
@@ -142,7 +141,7 @@ def test_stop_changes_state_and_loses_hand():
 
     executor.stop()
 
-    assert executor._state is ControlState.STOPPED
+    assert executor._state is EstadoControl.STOPPED
     assert executor._hand_detected is False
     
 def test_move_cursor_clamps_coordinates_to_screen():

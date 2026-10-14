@@ -6,11 +6,11 @@ import unittest
 from unittest.mock import Mock, patch
 
 from holocontrol.application.use_cases import AplicacionControl
-from holocontrol.application.services.existing_executor_adapter import AdaptadorEjecutorExistente
-from holocontrol.application.dto.recognition import Reconocimiento
+from holocontrol.application.services.adaptador_ejecutor_existente import AdaptadorEjecutorExistente
+from holocontrol.application.dto.reconocimiento import Reconocimiento
 from holocontrol.domain.entities import Calibracion
-from holocontrol.domain.value_objects.control_state import ControlState as EstadoControl
-from tests.support import RelojSimulado, RepositorioPerfilesMemoria
+from holocontrol.domain.value_objects.estado_control import EstadoControl
+from tests.soporte import RelojSimulado, RepositorioPerfilesMemoria
 
 
 class PruebasContratoWindowsExistente(unittest.TestCase):
