@@ -31,6 +31,7 @@ class ReconocedorGestos:
         self._activo: str | None = None
         self._candidato: str | None = None
         self._inicio_candidato_ms = 0
+        self._inicio_quieto_ms = 0
         self._inicio_activo_ms = 0
         self._confianza_activa = 0.0
         self._ancla: tuple[float, float] | None = None
@@ -124,6 +125,7 @@ class ReconocedorGestos:
             eventos.extend(self._terminar_activo(instante_ms))
             self._candidato = nombre
             self._inicio_candidato_ms = instante_ms
+            self._inicio_quieto_ms = instante_ms
             self._ancla = centro
             self._trayectoria.clear()
             self._discreto_consumido = False
@@ -164,13 +166,15 @@ class ReconocedorGestos:
                     return tuple(eventos)
             if distancia(centro, self._ancla) > self.configuracion.tolerancia_quieto:
                 self._ancla = centro
-                self._inicio_candidato_ms = instante_ms
+                # Mover la mano reinicia la quietud, pero no la estabilidad de su postura.
+                self._inicio_quieto_ms = instante_ms
         espera_ms = (
             self.configuracion.permanencia_ms
             if permanencia
             else (self.configuracion.estabilizacion_ms)
         )
-        if self._activo is None and instante_ms - self._inicio_candidato_ms >= espera_ms:
+        inicio_espera_ms = self._inicio_quieto_ms if permanencia else self._inicio_candidato_ms
+        if self._activo is None and instante_ms - inicio_espera_ms >= espera_ms:
             self._activar(nombre, confianza, instante_ms)
             if permanencia:
                 self._discreto_consumido = True

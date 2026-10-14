@@ -1,6 +1,6 @@
 # Validación del módulo de visión de Kinex
 
-Verificación inicial: 13 de octubre de 2026. Rama local: `feature/vision-gestures`. La revisión previa a publicación añade el manejo de errores de inicio y la compatibilidad de datos con el dominio en `f5f3e8d`.
+Verificación inicial: 13 de octubre de 2026. Revisión de deslizamientos: 14 de octubre de 2026. Rama local: `feature/vision-gestures`. La revisión previa a publicación añade el manejo de errores de inicio y la compatibilidad de datos con el dominio en `f5f3e8d`.
 
 La entrega se publica como rama de trabajo para integración, con validación real de webcam pendiente. La base es `origin/develop` en `4d4ede9`.
 
@@ -8,23 +8,34 @@ La entrega se publica como rama de trabajo para integración, con validación re
 
 | Comprobación | Resultado observado |
 | --- | --- |
-| Pruebas propias | 63 pruebas aprobadas: 61 unitarias y 2 de integración con el modelo local |
+| Pruebas propias | 72 pruebas aprobadas: 70 unitarias y 2 de integración con el modelo local |
 | Ruff y formato | Sin errores; 23 archivos Python verificados |
 | Dependencias | `pip check` sin conflictos; una sola distribución OpenCV |
 | Separación de capas | Importación de contratos, procesador y entrenador sin cargar Qt, NumPy, OpenCV, MediaPipe ni PyAutoGUI |
 | Modelo real | Inferencia local correcta sobre imágenes vacías, sin eventos ni coordenadas de control |
 | Fotografías oficiales de prueba | Índice reconocido y 21 puntos; lateralidad física derecha conservada con y sin espejo |
+| Deslizamientos a cadencia de vídeo | Ambos sentidos reconocidos con puntos simulados a 25, 30 y 60 FPS; no activan después palma quieta ni repiten el inicio |
 | Gestos propios | 20 muestras, validación de consistencia y ambigüedad; reconstrucción desde puntos canónicos y cambio de espejo aprobados |
 | Cierre | Recursos liberados en fallos; lectura bloqueada invalida el control y comunica timeout sin cerrar recursos desde dos hilos |
 | Vista previa | Desactivada por defecto, imágenes copiadas, descarte al desactivar o detener |
 | Demo de entrenamiento | Flujo de captura, validación y reconocimiento probado con cámara y puntos simulados |
 | Paquete distribuible | Wheel construido; adaptadores, contratos, modelo y licencia incluidos; SHA-256 del modelo verificado |
-| Compatibilidad Windows y dominio | 85 pruebas aprobadas en una copia temporal con Windows y el dominio publicados: las 63 propias, 20 existentes y 2 de conexión entre visión y ejecutor; conversión de perfil a configuración verificada |
+| Compatibilidad Windows y dominio | 94 pruebas aprobadas en una copia temporal con Windows y el dominio publicados: las 72 propias, 20 existentes y 2 de conexión entre visión y ejecutor; conversión de perfil a configuración verificada |
 | Integridad de otras áreas | El ejecutor del integrante 5 conserva el mismo objeto Git; no se modificaron UI, aplicación, dominio, persistencia ni acciones de Windows |
 
 La comprobación de Windows usa PyAutoGUI simulado. No mueve el mouse ni prueba interacción real con otras aplicaciones. Su archivo conserva el objeto Git `5d595b2515b65825bbb3aeb61fad5adc1242e0dd`.
 
 La cobertura automatizada observada en la verificación inicial fue 83 % incluyendo la herramienta de diagnóstico, cuya prueba de flujo se ejecutó aparte. La cobertura no mide precisión de reconocimiento ni rendimiento del equipo.
+
+Las pruebas de índice, pellizco, dos dedos, palma, puño, deslizamientos y posturas propias utilizan puntos de mano simulados. La fotografía oficial verifica el índice con MediaPipe real. Esto comprueba la lógica del reconocedor, pero no acredita que todos los gestos se detecten de forma fiable con una webcam, distintas manos e iluminación.
+
+## Revisión de deslizamientos
+
+La revisión adicional reprodujo un fallo a 25, 30 y 60 FPS simulados: mover la palma reiniciaba tanto la espera de quietud como el temporizador de estabilización. Así, un deslizamiento continuo de 200 ms podía no emitir ningún evento, aunque superara el desplazamiento requerido.
+
+Se separaron los dos temporizadores. El deslizamiento necesita mantener la postura abierta durante al menos 100 ms; moverla solo reinicia los 800 ms exigidos para una palma o un puño quietos. Nueve casos adicionales cubren ambos sentidos a tres cadencias, la quietud de palma y puño después de moverse, y el rechazo de un deslizamiento que cambia de postura antes de 100 ms. Todas las pruebas pasan.
+
+Estas cadencias son tiempos de fotogramas simulados; no representan FPS medidos con una cámara real.
 
 ## Ramas revisadas
 

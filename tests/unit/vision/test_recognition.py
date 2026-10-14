@@ -155,3 +155,57 @@ def test_rechaza_instantes_repetidos(crear_mano, crear_deteccion):
     procesador.interpretar(deteccion)
     with pytest.raises(ValueError, match="aumentar"):
         procesador.interpretar(deteccion)
+
+
+@pytest.mark.parametrize("fps", [25, 30, 60])
+@pytest.mark.parametrize("signo,direccion", [(1, "derecha"), (-1, "izquierda")])
+def test_deslizamiento_se_reconoce_a_cadencia_de_video(
+    fps, signo, direccion, crear_mano, crear_deteccion
+):
+    procesador = ProcesadorVision()
+    resultados = [
+        procesador.interpretar(
+            crear_deteccion(
+                crear_mano("palma_abierta", delta_x=0.05 + signo * 0.25 * min(instante, 200) / 200),
+                instante,
+            )
+        )
+        for instante in (round(i * 1000 / fps) for i in range(round(fps * 1.2) + 1))
+    ]
+    eventos = [evento for resultado in resultados for evento in resultado.eventos]
+    inicios = [evento for evento in eventos if evento.fase is FaseGesto.INICIO]
+    assert [evento.nombre for evento in inicios] == [f"deslizamiento_{direccion}"]
+    assert 100 <= inicios[0].instante_ms <= 200
+    assert all(evento.nombre != "palma_abierta" for evento in eventos)
+
+
+@pytest.mark.parametrize("postura", ["palma_abierta", "puno"])
+def test_movimiento_reinicia_quietud_sin_adelantar_gesto_discreto(
+    postura, crear_mano, crear_deteccion
+):
+    procesador = ProcesadorVision()
+    resultados = [
+        procesador.interpretar(
+            crear_deteccion(crear_mano(postura, delta_x=min(instante, 800) * 0.0001), instante)
+        )
+        for instante in range(0, 1700, 100)
+    ]
+    inicios = [
+        evento
+        for resultado in resultados
+        for evento in resultado.eventos
+        if evento.fase is FaseGesto.INICIO
+    ]
+    assert [(evento.nombre, evento.instante_ms) for evento in inicios] == [(postura, 1600)]
+
+
+def test_deslizamiento_demasiado_breve_no_supera_estabilizacion(crear_mano, crear_deteccion):
+    procesador = ProcesadorVision()
+    resultados = [
+        procesador.interpretar(
+            crear_deteccion(crear_mano("palma_abierta", delta_x=delta), instante)
+        )
+        for instante, delta in ((0, 0), (40, 0.13), (80, 0.25))
+    ]
+    resultados.append(procesador.interpretar(crear_deteccion(crear_mano(), 100)))
+    assert all(not resultado.eventos for resultado in resultados)
