@@ -4,7 +4,7 @@ from holocontrol.application.use_cases import AplicacionControl
 from holocontrol.application.dto.reconocimiento import Reconocimiento
 from holocontrol.domain.entities import Calibracion, Mano, Configuracion, AsignacionGesto
 from holocontrol.domain.errores import ErrorConflicto, ErrorControl, ErrorDominio, ErrorNoEncontrado
-from holocontrol.domain.value_objects.estado_control import ControlState as EstadoControl
+from holocontrol.domain.value_objects.estado_control import EstadoControl
 from tests.soporte import RepositorioPerfilesMemoria, EjecutorRegistro, RelojSimulado
 
 
