@@ -50,8 +50,8 @@ class WindowsActionExecutor(EjecutorControl):
 
     def _reset_click_gestures(self) -> None:
         
-        self._left_click_controller.resetear
-        self._right_click_controller.resetear
+        self._left_click_controller.resetear()
+        self._right_click_controller.resetear()
 
     def _ensure_allowed(self) -> None:
         if self._state is not EstadoControl.ACTIVE:
@@ -92,7 +92,7 @@ class WindowsActionExecutor(EjecutorControl):
         """Ejecuta un clic por cada nuevo gesto derecho."""
         self._ensure_allowed()
 
-        if self._right_click_controller.deveria_click(detected):
+        if self._right_click_controller.deberia_click(detected):
             self._click(button="right", new_gesture=True)
 
     def _click(
