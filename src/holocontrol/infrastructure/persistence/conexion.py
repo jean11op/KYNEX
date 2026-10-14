@@ -10,6 +10,23 @@ class BaseDatos:
     def __init__(self, ruta: str | Path):
         self.ruta = Path(ruta).expanduser().resolve()
 
+    def inicializar(self) -> None:
+        """Crea las tablas sin borrar los registros existentes."""
+        archivo = Path(__file__).with_name("esquema.sql")
+        esquema = archivo.read_text(encoding="utf-8")
+
+        conexion = self.conectar()
+
+        try:
+            conexion.executescript(
+                "BEGIN;\n" + esquema + "\nCOMMIT;"
+            )
+        except BaseException:
+            conexion.rollback()
+            raise
+        finally:
+            conexion.close()
+
     def conectar(self) -> sqlite3.Connection:
         """Abre la base de datos y activa las claves foráneas."""
         self.ruta.parent.mkdir(parents=True, exist_ok=True)
