@@ -80,7 +80,7 @@ class AplicacionControl:
             perfil = Perfil(identificador, self._nombre_unico(nombre), mano_dominante,
                               tiempo_espera_gesto_ms, limite_dictado,
                               asignaciones=asignaciones_predeterminadas(identificador))
-            self._repositorio.guardar(perfil)
+            self._repositorio.crear(perfil)
             return perfil
 
     def _guardar_cambios(self, perfil: Perfil) -> Perfil:

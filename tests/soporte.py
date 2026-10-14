@@ -8,6 +8,29 @@ class RepositorioPerfilesMemoria:
         self.perfiles = {}
         self.fallar_guardado = False
 
+
+    
+    def crear(self, perfil):
+        if self.fallar_guardado:
+            raise OSError("Almacenamiento no disponible")
+        if perfil.id in self.perfiles:
+            raise ErrorConflicto("Perfil ya existente")
+        if any(p.nombre.casefold() == perfil.nombre.casefold()
+               for p in self.perfiles.values()):
+            raise ErrorConflicto("Nombre duplicado")
+        self.perfiles[perfil.id] = perfil
+
+    def actualizar(self, perfil):
+        if self.fallar_guardado:
+            raise OSError("Almacenamiento no disponible")
+        if perfil.id not in self.perfiles:
+            raise ErrorNoEncontrado("Perfil inexistente")
+        if any(p.id != perfil.id and p.nombre.casefold() == perfil.nombre.casefold()
+               for p in self.perfiles.values()):
+            raise ErrorConflicto("Nombre duplicado")
+        self.perfiles[perfil.id] = perfil
+
+
     def listar(self):
         return tuple(self.perfiles.values())
 

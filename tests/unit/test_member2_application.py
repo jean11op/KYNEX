@@ -294,6 +294,6 @@ class PruebasAplicacion(unittest.TestCase):
     def test_bloquea_configuracion_corrupta(self):
         invalido = replace(self.perfil, asignaciones=(AsignacionGesto(
             self.perfil.id, "gesto_ajeno", "clic_izquierdo"),))
-        self.repositorio.guardar(invalido)
+        self.repositorio.actualizar(invalido)
         with self.assertRaises(ErrorDominio):
             self.iniciar()
