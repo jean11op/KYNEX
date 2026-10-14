@@ -87,7 +87,9 @@ def test_held_left_click_gesture_clicks_only_once():
 
 
 def test_new_left_click_gesture_allows_another_click():
-    executor = create_active_executor()
+    executor = WindowsActionExecutor(click_cooldown=0)
+    executor.activate()
+    executor.set_hand_detected(True)
 
     with patch(
         "holocontrol.infrastructure.windows.windows_action_executor.pyautogui.click"
@@ -96,8 +98,7 @@ def test_new_left_click_gesture_allows_another_click():
         executor.handle_left_click_gesture(False)
         executor.handle_left_click_gesture(True)
 
-    # The new gesture is recognized, but the click cooldown still applies.
-    assert click.call_count == 1
+    assert click.call_count == 2
 
 
 def test_click_cooldown_is_applied_to_new_gestures():
@@ -132,6 +133,25 @@ def test_held_right_click_gesture_clicks_only_once():
     click.assert_called_once_with(button="right")
 
 
+def test_left_and_right_gestures_have_independent_state():
+    executor = WindowsActionExecutor(click_cooldown=0)
+    executor.activate()
+    executor.set_hand_detected(True)
+
+    with patch(
+        "holocontrol.infrastructure.windows.windows_action_executor.pyautogui.click"
+    ) as click:
+        executor.handle_left_click_gesture(True)
+        executor.handle_right_click_gesture(True)
+        executor.handle_left_click_gesture(True)
+        executor.handle_right_click_gesture(True)
+
+    assert click.call_args_list == [
+        ((), {"button": "left"}),
+        ((), {"button": "right"}),
+    ]
+
+
 def test_hand_loss_resets_click_gesture():
     executor = create_active_executor()
 
@@ -141,6 +161,24 @@ def test_hand_loss_resets_click_gesture():
         executor.handle_left_click_gesture(True)
         executor.set_hand_detected(False)
 
+        executor.set_hand_detected(True)
+        executor.handle_left_click_gesture(True)
+
+    assert click.call_count == 2
+
+
+@pytest.mark.parametrize("transition", ["pause", "stop"])
+def test_pause_and_stop_reset_click_gesture(transition):
+    executor = WindowsActionExecutor(click_cooldown=0)
+    executor.activate()
+    executor.set_hand_detected(True)
+
+    with patch(
+        "holocontrol.infrastructure.windows.windows_action_executor.pyautogui.click"
+    ) as click:
+        executor.handle_left_click_gesture(True)
+        getattr(executor, transition)()
+        executor.activate()
         executor.set_hand_detected(True)
         executor.handle_left_click_gesture(True)
 
