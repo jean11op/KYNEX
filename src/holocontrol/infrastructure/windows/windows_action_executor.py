@@ -1,11 +1,9 @@
-
 import pyautogui
 
 from holocontrol.application.services.controlador_click import ClickController
-from holocontrol.ports.system_actions.ejecutor_control import EjecutorControl
 from holocontrol.domain.value_objects.estado_control import EstadoControl
 
-class WindowsActionExecutor(EjecutorControl):
+class WindowsActionExecutor:
     """Implementa acciones controladas del ratón para Windows."""
 
     def __init__(self, click_cooldown: float = 0.4):

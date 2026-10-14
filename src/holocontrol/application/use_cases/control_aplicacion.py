@@ -86,7 +86,7 @@ class AplicacionControl:
     def _guardar_cambios(self, perfil: Perfil) -> Perfil:
         if self._seleccionado == perfil.id and self._estado is EstadoControl.ACTIVE:
             self.pausar_control()
-        self._repositorio.guardar(perfil)
+        self._repositorio.actualizar(perfil)
         return perfil
 
     def editar_perfil(self, id_perfil: str, *, nombre: str | None = None,
