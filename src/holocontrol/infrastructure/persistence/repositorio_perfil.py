@@ -8,6 +8,10 @@ from holocontrol.domain.entities import (
 )
 from holocontrol.domain.errores import ErrorConflicto, ErrorNoEncontrado
 from holocontrol.infrastructure.persistence.conexion import BaseDatos
+from holocontrol.domain.errores import ErrorDominio
+from holocontrol.infrastructure.persistence.errores import (
+    ErrorDatosPersistidos,
+)
 
 
 class RepositorioPerfilesSQLite:
@@ -278,7 +282,7 @@ class RepositorioPerfilesSQLite:
             )
 
     # AUXILIAR: convertir los registros en un objeto Perfil.
-    def _leer_perfil(self, conexion, id_perfil: str) -> Perfil | None:
+    def _reconstruir_perfil(self, conexion, id_perfil: str) -> Perfil | None:
         datos = conexion.execute(
             "SELECT * FROM Perfil WHERE id_perfil = ?",
             (id_perfil,),
@@ -376,3 +380,13 @@ class RepositorioPerfilesSQLite:
             gestos=tuple(gestos),
             asignaciones=tuple(asignaciones),
         )
+
+    def _leer_perfil(self, conexion, id_perfil: str) -> Perfil | None:
+        """Comunica si los datos guardados no permiten construir el perfil."""
+        try:
+            return self._reconstruir_perfil(conexion, id_perfil)
+
+        except (ErrorDominio, ValueError, TypeError, KeyError, IndexError) as error:
+            raise ErrorDatosPersistidos(
+                f"El perfil '{id_perfil}' tiene datos incompletos o inválidos."
+            ) from error
