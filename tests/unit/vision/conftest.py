@@ -22,6 +22,7 @@ def crear_mano():
             (0.22, 0.50, 0.0),
         ]
         extendidos = {
+            "borrar": (False, False, True, True),
             "menique": (False, False, False, True),
             "cuernos": (True, False, False, True),
             "indice": (True, False, False, False),

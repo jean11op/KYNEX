@@ -59,6 +59,10 @@ class AplicacionControl:
         self._resto_scroll = 0.0
         self._posicion: tuple[float, float] | None = None
         self._pantalla = (1, 1)
+        self._flecha = None
+        self._proxima_flecha = 0.0
+        self._inicio_borrado = None
+        self._borrado_completo = False
         self._acciones = {a.id: a for a in ACCIONES}
         self._gestos = {g.id: g for g in GESTOS}
 
@@ -215,6 +219,8 @@ class AplicacionControl:
         self._ultimo_fotograma = float('-inf')
         self._ultima_accion = float('-inf')
         self._gestos_activos.clear()
+        self._flecha = None
+        self._inicio_borrado = None
         self._ultimo_evento = float('-inf')
         self._eventos_del_instante.clear()
         self._resto_scroll = 0.0
@@ -411,6 +417,8 @@ class AplicacionControl:
                 self._ejecutor.establecer_mano_detectada(mano)
                 self._mano = mano
                 if not mano:
+                    self._flecha = None
+                    self._inicio_borrado = None
                     self._zoom_ancla = None
                     self._scroll_ancla = None
                     self._scroll_instante = None
@@ -443,6 +451,10 @@ class AplicacionControl:
                         self._eventos_del_instante.add(clave)
                         nombre = self._resolver_nombre_vision(evento.nombre)
                         if evento.fase is FaseGesto.FIN:
+                            if nombre == 'dos_dedos':
+                                self._flecha = None
+                            if nombre == 'pulgar_abajo':
+                                self._inicio_borrado = None
                             if nombre == 'pellizco' and getattr(self._ejecutor, 'admite_arrastre', False):
                                 self._ejecutor.terminar_pellizco(cancelado=ahora - instante > .25)
                             if nombre in self._gestos_activos and any(a.id_gesto == nombre and a.id_accion == 'cambiar_ventana' and a.activo for a in self._perfil_activo.asignaciones):
@@ -492,14 +504,45 @@ class AplicacionControl:
         if asignacion is None:
             return ResultadoGesto(False, "sin_asignacion_activa")
         accion = self._acciones[asignacion.id_accion]
+        if accion.id == 'flechas':
+            if fotograma.separacion_dedos is not None:
+                self._zoom_ancla = fotograma.separacion_dedos
+            direccion = fotograma.direccion_flechas
+            if fase is FaseGesto.INICIO:
+                self._flecha = None
+            if direccion is None or fase is None:
+                self._flecha = None
+                return ResultadoGesto(False, 'direccion_neutra', accion.id)
+            if direccion != self._flecha:
+                self._flecha = direccion
+                espera = .4
+            elif instante >= self._proxima_flecha:
+                espera = .12
+            else:
+                return ResultadoGesto(False, 'espera_repeticion', accion.id)
+            self._ejecutor.pulsar_tecla(direccion)
+            self._proxima_flecha = instante + espera
+            return ResultadoGesto(True, 'accion_enviada', accion.id)
+        if accion.id == 'borrar':
+            if fase is FaseGesto.INICIO:
+                self._inicio_borrado = instante
+                self._borrado_completo = False
+                self._ejecutor.pulsar_tecla('backspace')
+                return ResultadoGesto(True, 'accion_enviada', accion.id)
+            if (fase is FaseGesto.MANTENIMIENTO and self._inicio_borrado is not None
+                    and not self._borrado_completo and instante - self._inicio_borrado >= 2):
+                self._ejecutor.pulsar_tecla('borrar_todo')
+                self._borrado_completo = True
+                return ResultadoGesto(True, 'accion_enviada', accion.id)
+            return ResultadoGesto(False, 'espera_borrado', accion.id)
         if (nombre == 'pellizco' and accion.tipo in (TipoAccion.CLIC_IZQUIERDO, TipoAccion.ARRASTRAR)
                 and fase is not None and getattr(self._ejecutor, 'admite_arrastre', False)):
             if fotograma.x is None or perfil.calibracion is None:
                 return ResultadoGesto(False, 'sin_coordenadas_o_calibracion', accion.id)
             if accion.tipo is TipoAccion.ARRASTRAR and fotograma.centro_palma is not None:
                 # Palm tracking avoids fingertip wobble and cumulative double smoothing.
-                x = round(fotograma.centro_palma[0] * self._pantalla[0] * perfil.calibracion.sensibilidad / .6)
-                y = round(fotograma.centro_palma[1] * self._pantalla[1] * perfil.calibracion.sensibilidad / .6)
+                x = round(fotograma.centro_palma[0] * self._pantalla[0] * perfil.calibracion.sensibilidad)
+                y = round(fotograma.centro_palma[1] * self._pantalla[1] * perfil.calibracion.sensibilidad)
             else:
                 x, y = self._posicion_cursor(fotograma, perfil.calibracion)
             if fase is FaseGesto.INICIO:

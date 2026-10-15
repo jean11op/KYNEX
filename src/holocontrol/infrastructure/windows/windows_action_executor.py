@@ -34,6 +34,7 @@ class WindowsActionExecutor(ActionExecutor):
         self._dragging = False
         self._dictation_requested = False
         self._drag_position = None
+        self._drag_updated_at = None
         self._switching = False
         self._switch_anchor = 0.0
 
@@ -112,6 +113,8 @@ class WindowsActionExecutor(ActionExecutor):
             self._pinch_started = self._clock()
             self._pinch_anchor = (x, y)
             self._pointer_anchor = pyautogui.position()
+            self._drag_position = tuple(self._pointer_anchor)
+            self._drag_updated_at = self._clock()
 
     def begin_drag(self, x: int, y: int) -> None:
         self.begin_pinch(x, y)
@@ -130,12 +133,21 @@ class WindowsActionExecutor(ActionExecutor):
         if self._dragging:
             target = (self._pointer_anchor[0] + x - self._pinch_anchor[0],
                       self._pointer_anchor[1] + y - self._pinch_anchor[1])
+            width, height = pyautogui.size()
+            target = (max(1, min(target[0], width - 2)),
+                      max(1, min(target[1], height - 2)))
             if self._drag_position is None:
                 self.move_cursor(*target)
             else:
                 previous = self._drag_position
                 distance = math.dist(previous, target)
-                weight = .5 if distance < 8 else .85
+                now = self._clock()
+                elapsed = max(.001, min(.1, now - self._drag_updated_at))
+                # Filter small tracking tremors, following deliberate strokes faster.
+                # Time-based weighting keeps the feel consistent across frame rates.
+                cutoff = 3 + 12 * min(1.0, distance / 30)
+                weight = 1 - math.exp(-2 * math.pi * cutoff * elapsed)
+                self._drag_updated_at = now
                 current = tuple(a + weight*(b-a) for a,b in zip(previous,target))
                 segments = max(1, min(12, math.ceil(math.dist(previous,current)/5)))
                 for i in range(1, segments+1):
@@ -156,6 +168,7 @@ class WindowsActionExecutor(ActionExecutor):
             self.left_click()
         self._pinch_started = None
         self._drag_position = None
+        self._drag_updated_at = None
 
     def left_click(self) -> None:
         """Ejecuta un clic izquierdo autorizado."""
@@ -246,7 +259,11 @@ class WindowsActionExecutor(ActionExecutor):
 
     def press_key(self, key: str) -> None:
         self._ensure_allowed()
-        if key not in ('enter', 'esc', 'volumeup', 'volumedown'):
+        if key == 'borrar_todo':
+            pyautogui.hotkey('ctrl', 'a', _pause=False)
+            pyautogui.press('backspace', _pause=False)
+            return
+        if key not in ('enter', 'esc', 'volumeup', 'volumedown', 'up', 'down', 'left', 'right', 'backspace'):
             raise ValueError("Tecla no admitida.")
         pyautogui.press(key, _pause=False)
 

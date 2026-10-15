@@ -32,6 +32,7 @@ class PruebasContratoWindowsExistente(unittest.TestCase):
         self.ejecutor = modulo.WindowsActionExecutor(click_cooldown=0)
         self.aplicacion = AplicacionControl(RepositorioPerfilesMemoria(), AdaptadorEjecutorExistente(self.ejecutor), self.reloj)
         p = self.aplicacion.crear_perfil("Contrato")
+        self.aplicacion.configurar_gesto(p.id, 'dos_dedos', 'desplazar_vertical', reemplazar_existente=True)
         self.aplicacion.seleccionar_perfil(p.id)
         self.aplicacion.calibrar_perfil(Calibracion(p.id, suavizado=0))
         self.aplicacion.iniciar_control(camara_disponible=True, ancho_pantalla=1920, alto_pantalla=1080)

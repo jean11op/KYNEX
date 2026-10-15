@@ -84,6 +84,12 @@ def crear_nucleo(
     for guardado in repositorio.listar():
         # Upgrade the old default click while preserving unrelated custom bindings.
         asignaciones = guardado.asignaciones
+        asignaciones = tuple(
+            replace(a, id_accion='flechas')
+            if a.id_gesto == 'dos_dedos' and a.id_accion == 'desplazar_vertical' else a
+            for a in asignaciones)
+        if not any(a.id_gesto == 'pulgar_abajo' for a in asignaciones):
+            asignaciones += (AsignacionGesto(guardado.id, 'pulgar_abajo', 'borrar'),)
         if not any(a.id_gesto == 'pulgar' for a in asignaciones):
             anterior = next((a for a in asignaciones if a.id_gesto == 'pellizco'
                              and a.id_accion == 'clic_izquierdo'), None)
@@ -214,7 +220,7 @@ class MainWindow(DashboardWindow):
         box.addLayout(grid)
         box.addWidget(button('Guardar asignaciones', self.save_gestures, 'primary'))
         box.addWidget(button('Restaurar predeterminados', self.restore_gestures))
-        box.addWidget(label('Pulgar lateral: clic; pistola (indice extendido y pulgar levantado): mantener clic y dibujar; dos dedos arriba/abajo: scroll; separar/juntar dos dedos: zoom; like: activar/desactivar dictado; palma abierta 7 segundos: pausa; puño cerrado 2 segundos: minimizar una vez. Todos los comandos funcionan con ambas manos.', 'muted'))
+        box.addWidget(label('Pulgar lateral: clic; pistola (indice extendido y pulgar levantado): mantener clic y dibujar; dos dedos apuntando arriba, abajo, izquierda o derecha: flechas; solo meñique arriba: Enter; solo meñique hacia la izquierda de la pantalla: borrar un carácter, mantener 2 segundos: borrar todo el campo; separar/juntar dos dedos: zoom; like: activar/desactivar dictado; palma abierta 7 segundos: pausa; puño cerrado 2 segundos: minimizar una vez. Se usa únicamente la mano seleccionada en el perfil.', 'muted'))
         self.threshold = QSpinBox(self)
         self.threshold.hide()
         box.addStretch()

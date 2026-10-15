@@ -118,6 +118,7 @@ def test_flujo_vision_dominio_windows_con_dispositivos_simulados(monkeypatch):
         RepositorioPerfilesMemoria(), AdaptadorEjecutorExistente(ejecucion)
     )
     perfil = aplicacion.crear_perfil("Integración visión")
+    aplicacion.configurar_gesto(perfil.id, "dos_dedos", "desplazar_vertical", reemplazar_existente=True)
     aplicacion.seleccionar_perfil(perfil.id)
     aplicacion.calibrar_perfil(Calibracion(perfil.id, suavizado=0.5))
 

@@ -90,3 +90,30 @@ def test_lateral_motion_of_whole_hand_does_not_click(crear_mano, crear_deteccion
         current = replace(current, puntos=tuple(replace(p,x=p.x+offset) for p in current.puntos))
         result = processor.interpretar(crear_deteccion(current,t))
         assert not any(e.nombre == 'pulgar' for e in result.eventos)
+
+
+@pytest.mark.parametrize('mirror', [False, True])
+def test_held_thumb_drags_until_hidden_without_extra_click(crear_mano, crear_deteccion, mirror):
+    processor = ProcesadorVision()
+    hand = crear_mano()
+    events = []
+    for t in range(0, 2300, 50):
+        opening = .1 if t < 150 or t >= 2100 else .65
+        current = thumb(hand, opening, mirror)
+        if 700 <= t < 2100:
+            current = replace(current, puntos=tuple(replace(p, y=p.y-.1) for p in current.puntos))
+        events.extend(processor.interpretar(crear_deteccion(current, t)).eventos)
+    drag = [e for e in events if e.nombre == 'pellizco']
+    assert [e.fase for e in drag].count(FaseGesto.INICIO) == 1
+    assert any(e.fase is FaseGesto.MANTENIMIENTO and e.instante_ms == 2000 for e in drag)
+    assert [(e.fase, e.instante_ms) for e in drag if e.fase is FaseGesto.FIN] == [(FaseGesto.FIN, 2100)]
+    assert not any(e.nombre == 'pulgar' for e in events)
+
+
+def test_losing_hand_releases_held_thumb(crear_mano, crear_deteccion):
+    processor = ProcesadorVision()
+    hand = crear_mano()
+    for t in range(0, 1000, 50):
+        processor.interpretar(crear_deteccion(thumb(hand, .1 if t < 150 else .65), t))
+    result = processor.interpretar(crear_deteccion(instante=1000))
+    assert [(e.nombre, e.fase) for e in result.eventos] == [('pellizco', FaseGesto.FIN)]

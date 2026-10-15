@@ -27,6 +27,7 @@ class PruebasIntegracionVision(unittest.TestCase):
         self.ejecutor = EjecutorRegistro()
         self.app = AplicacionControl(RepositorioPerfilesMemoria(), self.ejecutor, self.reloj)
         self.perfil = self.app.crear_perfil("Visión", tiempo_espera_gesto_ms=1)
+        self.app.configurar_gesto(self.perfil.id, 'dos_dedos', 'desplazar_vertical', reemplazar_existente=True)
         self.app.seleccionar_perfil(self.perfil.id)
         self.app.calibrar_perfil(Calibracion(self.perfil.id, suavizado=0))
         self.app.iniciar_control(camara_disponible=True, ancho_pantalla=101, alto_pantalla=101)

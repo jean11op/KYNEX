@@ -47,6 +47,10 @@ class ReconocedorGestos:
         self._ultimo_tres_dedos_ms = -1000
         self._ultimo_cursor_valido_ms = -1000
 
+    @property
+    def esperando_puno(self) -> bool:
+        return self._candidato == GestoBasico.PUNO.value and self._activo is None
+
     def reiniciar(self, instante_ms: int) -> tuple[EventoGesto, ...]:
         self._thumb_click.reset()
         self._zoom_base = None
@@ -93,7 +97,17 @@ class ReconocedorGestos:
                     and angulo(puntos[2], puntos[3], puntos[4]) > 150):
                 return GestoBasico.LIKE.value, confianza
             return nombre.value, confianza
-        if nombre in (GestoBasico.MENIQUE, GestoBasico.CUERNOS) and confianza >= self.configuracion.umbral_gesto:
+        if nombre is GestoBasico.MENIQUE and confianza >= self.configuracion.umbral_gesto:
+            dx = puntos[20][0] - puntos[17][0]
+            dy = puntos[20][1] - puntos[17][1]
+            # Screen directions, identical for either selected hand. Leave a
+            # neutral diagonal region so rotating between commands cannot fire both.
+            if -dx >= max(ancho_palma * .4, abs(dy) * 1.5):
+                return GestoBasico.PULGAR_ABAJO.value, confianza
+            if -dy >= max(ancho_palma * .4, abs(dx) * 1.5):
+                return GestoBasico.MENIQUE.value, confianza
+            return None, 0.0
+        if nombre is GestoBasico.CUERNOS and confianza >= self.configuracion.umbral_gesto:
             return nombre.value, confianza
         # Keep the historical ID for saved drag bindings, but recognize a gun
         # posture instead of thumb/index contact. Angles work with either hand.
@@ -135,12 +149,14 @@ class ReconocedorGestos:
         en_espejo: bool = False,
     ) -> tuple[EventoGesto, ...]:
         nombre, confianza = self._clasificar(mano, relacion_aspecto, en_espejo)
-        if nombre == GestoBasico.PELLIZCO.value or self._activo == GestoBasico.PELLIZCO.value:
+        if (nombre == GestoBasico.PELLIZCO.value or self._activo == GestoBasico.PELLIZCO.value) and not self._thumb_click.held:
             # A held gun must neither freeze drawing nor click when released.
             self._thumb_click.reset()
             frozen, clicked = False, False
         else:
             frozen, clicked = self._thumb_click.update(mano, instante_ms, relacion_aspecto)
+        if self._thumb_click.held:
+            nombre, confianza = GestoBasico.PELLIZCO.value, 1.0
         if frozen:
             events = list(self._terminar_activo(instante_ms))
             self._candidato = None
@@ -236,7 +252,7 @@ class ReconocedorGestos:
         espera_ms = (self.configuracion.pausa_palma_ms if nombre == GestoBasico.PALMA_ABIERTA.value
                      else 2000 if nombre == GestoBasico.PUNO.value
                      else 500 if nombre in (GestoBasico.MENIQUE.value, GestoBasico.CUERNOS.value)
-                     else 250 if nombre == GestoBasico.LIKE.value
+                     else 250 if nombre in (GestoBasico.LIKE.value, GestoBasico.PULGAR_ABAJO.value)
                      else self.configuracion.estabilizacion_ms)
         inicio_espera_ms = self._inicio_candidato_ms
         if (nombre == GestoBasico.PALMA_ABIERTA.value and self._activo in (

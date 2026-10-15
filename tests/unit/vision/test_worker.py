@@ -357,3 +357,28 @@ def test_error_se_informa_antes_de_un_cierre_nativo_bloqueado(crear_mano):
         assert adaptador.detener(1)
     assert camara.cerrada and detector.cerrado
     assert adaptador.estado is EstadoVision.ERROR_CAMARA
+
+
+def test_camera_worker_continues_with_other_hand_peace_sign(crear_mano):
+    from holocontrol.ports.vision.models import Lateralidad
+
+    selected = crear_mano()
+    other = crear_mano('dos_dedos', lateralidad=Lateralidad.IZQUIERDA)
+
+    class TwoHands(DetectorSimulado):
+        def detectar(self, frame):
+            detection = super().detectar(frame)
+            return replace(detection, manos=(other, selected))
+
+    camera = CamaraSimulada()
+    detector = TwoHands(selected)
+    adapter = AdaptadorVision(crear_camara=lambda: camera, crear_detector=lambda: detector)
+    adapter.iniciar()
+    try:
+        for _ in range(5):
+            result = esperar_estado(adapter, EstadoVision.MANO_DETECTADA)
+            assert result.mano is selected
+            assert all(e.nombre != 'dos_dedos' for e in result.eventos)
+            assert adapter.en_ejecucion and adapter.camara_disponible
+    finally:
+        assert adapter.detener(1)

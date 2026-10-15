@@ -1,6 +1,8 @@
 from holocontrol.domain.entities import Accion, AsignacionGesto, Gesto, TipoAccion
 
 ACCIONES = (
+    Accion("flechas", "Flechas en cuatro direcciones", TipoAccion.TECLA),
+    Accion("borrar", "Borrar texto (mantener: borrar todo)", TipoAccion.TECLA),
     Accion("enter", "Enter", TipoAccion.TECLA),
     Accion("escape", "Escape", TipoAccion.TECLA),
     Accion("volumen_subir", "Subir volumen", TipoAccion.TECLA),
@@ -19,14 +21,15 @@ ACCIONES = (
     Accion("pausar", "Pausar control", TipoAccion.PAUSAR),
 )
 GESTOS = (
-    Gesto("menique", "Solo me\u00f1ique (Enter)", umbral_confianza=0.6),
+    Gesto("pulgar_abajo", "Meñique a la izquierda (borrar)", umbral_confianza=0.6),
+    Gesto("menique", "Meñique arriba (Enter)", umbral_confianza=0.6),
     Gesto("cuernos", "Indice y me\u00f1ique (Escape)", umbral_confianza=0.6),
     Gesto("like", "Pulgar arriba (voz)", umbral_confianza=0.6),
     Gesto("zoom", "Separar o juntar dos dedos", umbral_confianza=0.6),
     Gesto("pulgar", "Abrir y cerrar pulgar"),
     Gesto("tres_dedos", "Tres dedos", umbral_confianza=0.6),
     Gesto("indice", "Índice extendido"),
-    Gesto("pellizco", "Pistola (mantener clic)", umbral_confianza=0.6),
+    Gesto("pellizco", "Pulgar sostenido (mantener clic)", umbral_confianza=0.6),
     Gesto("dos_dedos", "Dos dedos", umbral_confianza=0.6),
     Gesto("subir", "Deslizar arriba"),
     Gesto("bajar", "Deslizar abajo"),
@@ -37,6 +40,7 @@ GESTOS = (
 )
 # Los gestos sin función implementada quedan disponibles, sin asignación automática.
 PARES_PREDETERMINADOS = (
+    ("pulgar_abajo", "borrar"),
     ("menique", "enter"),
     ("cuernos", "escape"),
     ("deslizamiento_derecha", "volumen_subir"),
@@ -48,7 +52,7 @@ PARES_PREDETERMINADOS = (
     ("tres_dedos", "cambiar_ventana"),
     ("indice", "cursor"),
     ("pulgar", "clic_izquierdo"),
-    ("dos_dedos", "desplazar_vertical"),
+    ("dos_dedos", "flechas"),
     ("subir", "desplazar_arriba"),
     ("bajar", "desplazar_abajo"),
     ("palma_abierta", "pausar"),

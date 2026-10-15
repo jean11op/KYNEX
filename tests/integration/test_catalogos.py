@@ -21,7 +21,7 @@ def test_carga_acciones_y_tipos(tmp_path):
         ).fetchone()
 
         cantidad_acciones = resultado[0]
-        assert cantidad_acciones == 16
+        assert cantidad_acciones == 18
 
         # Cada elemento contiene:
         # identificador de acción, tipo y cantidad de desplazamiento.
@@ -60,7 +60,7 @@ def test_carga_gestos_compartidos(tmp_path):
         ).fetchone()
 
         cantidad_gestos = resultado[0]
-        assert cantidad_gestos == 15
+        assert cantidad_gestos == 16
 
         gestos_esperados = [
             "indice",
@@ -127,14 +127,14 @@ def test_reinicializar_no_duplica_ni_borra_datos(tmp_path):
             "SELECT COUNT(*) FROM Accion"
         ).fetchone()
 
-        assert resultado[0] == 16
+        assert resultado[0] == 18
 
-        # Debe haber seis gestos compartidos y uno personalizado.
+        # Diecis?is gestos compartidos y uno personalizado.
         resultado = conexion.execute(
             "SELECT COUNT(*) FROM Gesto"
         ).fetchone()
 
-        assert resultado[0] == 16
+        assert resultado[0] == 17
 
         # El perfil debe conservarse.
         perfil = conexion.execute(
@@ -188,5 +188,5 @@ def test_migrates_previous_release_keyboard_and_fist_threshold(tmp_path):
     base.inicializar()
     with base.conectar() as connection:
         assert connection.execute("SELECT umbral_confianza FROM Gesto WHERE id_gesto='puno'").fetchone()[0] == .6
-        assert connection.execute("SELECT count(*) FROM Accion WHERE id_tipo_accion='tecla'").fetchone()[0] == 4
+        assert connection.execute("SELECT count(*) FROM Accion WHERE id_tipo_accion='tecla'").fetchone()[0] == 6
         assert connection.execute('PRAGMA foreign_key_check').fetchall() == []

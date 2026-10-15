@@ -13,6 +13,8 @@ class ThumbClick:
         self.anchor = None
         self.locked = False
         self.open_confirmed = False
+        self.held = False
+        self.moved = False
 
     def update(self, hand, timestamp, aspect):
         points = coordenadas_mano(hand, aspect)
@@ -38,16 +40,22 @@ class ThumbClick:
             else:
                 return False, False
         tip = (hand.puntos[8].x, hand.puntos[8].y)
-        if distancia(tip, self.anchor) > .06 or timestamp-self.opened_at > 1500:
-            self.reset()
-            return False, False
+        if distancia(tip, self.anchor) > .06:
+            self.moved = True
         if opening >= .50 and timestamp-self.opened_at >= 60:
             self.open_confirmed = True
+        if not closed and self.open_confirmed and timestamp-self.opened_at >= 400:
+            self.held = True
+        if self.held:
+            if closed:
+                self.reset()
+                self.ready = True
+            return False, False
         if closed:
             if self.closed_at is None:
                 self.closed_at = timestamp
             if timestamp-self.closed_at >= 40:
-                clicked = self.open_confirmed
+                clicked = self.open_confirmed and not self.moved
                 self.reset()
                 self.ready = True
                 return True, clicked

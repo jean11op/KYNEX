@@ -45,7 +45,7 @@ Las asignaciones de la pantalla Gestos se guardan en el perfil real de SQLite.
 Guardar cambios detiene el control: pulsa Iniciar para aplicarlos.
 El control admite arrastre y cambio de ventanas con tres dedos.
 Los identificadores históricos `subir` y `bajar` no los emite el reconocedor;
-el desplazamiento funcional se realiza con dos dedos y movimiento vertical.
+la navegaci?n se realiza apuntando dos dedos en cuatro direcciones.
 
 Los puntos desaparecen al perder seguimiento. Si se indica «Presenta la mano…»,
 muestra cualquiera de las dos manos. La vista de puntos consulta una copia
@@ -65,11 +65,11 @@ El control de gestos funciona en un trabajador independiente de la ventana, incl
 
 Gestos adicionales:
 
-- **Zoom:** con índice y medio extendidos, sepáralos o júntalos manteniendo el centro de la mano quieto. Cambia de gesto para volver al scroll.
-- **Dibujar/arrastrar:** extiende el índice y levanta el pulgar formando una pistola, con los otros tres dedos doblados. El trazo sigue la palma; baja el pulgar o cambia de gesto para soltar. Perder la mano también suelta el botón. El clic simple sigue usando el pulgar lateral.
+- **Zoom:** con índice y medio extendidos, sepáralos o júntalos manteniendo el centro de la mano quieto. Cambia de gesto para volver a las flechas.
+- **Dibujar/arrastrar:** con el índice extendido y los otros tres dedos doblados, abre el pulgar como para hacer clic y mantenlo abierto aproximadamente medio segundo. El botón permanece presionado mientras el pulgar siga abierto; escóndelo para soltar. El trazo sigue la palma y perder la mano también suelta el botón. Abrir y esconder el pulgar brevemente sigue haciendo un clic simple. Funciona con la mano seleccionada en el perfil; la otra mano se ignora. El movimiento de dibujo tiene menor amplificaci?n y suavizado adaptativo para reducir temblores.
 - **Voz:** haz clic en un campo de texto y muestra el pulgar arriba (like), con los otros dedos doblados. Espera a que Windows indique que escucha y habla. Baja el gesto y haz otro like para detenerlo.
 - El dictado usa la escritura por voz de Windows, necesita internet, micrófono y teclado en español (España o México). El audio se procesa mediante el servicio de Microsoft. La precisión depende del ruido, el micrófono y la pronunciación; no es infalible.
-- **Canva:** el scroll envía mensajes de rueda directamente a la ventana bajo el centro del editor, sin hacer clic ni pulsar flechas. El zoom usa Ctrl + rueda. Esta detección requiere que el título de la ventana incluya «Canva».
+- **Scroll opcional (reasignable en Gestos):** en Canva, el scroll envía mensajes de rueda directamente a la ventana bajo el centro del editor, sin hacer clic ni pulsar flechas. El zoom usa Ctrl + rueda. Esta detección requiere que el título de la ventana incluya «Canva».
 - **Puño:** usa el mismo umbral de confianza que el reconocedor (0,6) y minimiza la ventana activa tras 2 segundos continuos, una vez por cierre. Abrir la mano o perder seguimiento reinicia la cuenta. Reinicia HoloControl para cargar los cambios.
 
 Referencia del dictado: https://support.microsoft.com/en-us/accessibility/windows/use-voice-typing-to-talk-instead-of-type-on-your-pc
@@ -84,3 +84,6 @@ Controles de teclado:
 - **Bajar volumen:** palma abierta y barrido horizontal hacia la izquierda de la imagen.
 - Cada gesto envía una pulsación. Cambia de postura antes de repetirlo. La palma abierta durante 7 segundos sigue pausando el control.
 - Enter y Escape actúan sobre la aplicación que esté activa. El volumen corresponde al sistema.
+
+- **Flechas:** apunta índice y medio juntos hacia arriba, abajo, izquierda o derecha. Mantener repite la tecla; bajar los dedos detiene las pulsaciones. Se aplican al elemento que tenga el foco.
+- **Borrar:** extiende solo el meñique y apúntalo hacia la izquierda de la pantalla. El mismo dedo apuntando arriba hace Enter. Borra un carácter (o la selección); mantener 2 segundos adicionales selecciona todo y borra el contenido del campo activo. Suelta antes de repetir.

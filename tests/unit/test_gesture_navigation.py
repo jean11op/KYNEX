@@ -17,14 +17,15 @@ def control():
     executor = Mock()
     app = AplicacionControl(RepositorioPerfilesMemoria(), AdaptadorEjecutorExistente(executor), clock)
     profile = app.crear_perfil("Test")
+    app.configurar_gesto(profile.id, "dos_dedos", "desplazar_vertical", reemplazar_existente=True)
     app.seleccionar_perfil(profile.id)
     app.calibrar_perfil(Calibracion(profile.id, suavizado=.5))
     state = app.iniciar_control(camara_disponible=True, ancho_pantalla=1920, alto_pantalla=1080)
-    def frame(gesture, phase=FaseGesto.INICIO, x=.5, y=.45, direction=None, confidence=.99, separation=None, palm=None):
+    def frame(gesture, phase=FaseGesto.INICIO, x=.5, y=.45, direction=None, confidence=.99, separation=None, palm=None, arrow=None):
         clock.ahora = round(clock() + .05, 3)
         event = EventoGesto(gesture, phase, round(clock() * 1000), 0, confidence)
         return app.procesar_reconocimiento(Reconocimiento(
-            state.generacion, round(clock(), 3), True, x=x, y=y, eventos=(event,), direccion_scroll=direction, separacion_dedos=separation, centro_palma=palm))
+            state.generacion, round(clock(), 3), True, x=x, y=y, eventos=(event,), direccion_scroll=direction, direccion_flechas=arrow, separacion_dedos=separation, centro_palma=palm))
     return app, executor, frame, clock
 
 
@@ -225,3 +226,53 @@ def test_keyboard_actions_once_per_gesture(control, gesture, key):
     frame(gesture, FaseGesto.FIN)
     frame(gesture)
     assert executor.press_key.call_count == 2
+
+
+@pytest.mark.parametrize('direction', ['up', 'down', 'left', 'right'])
+def test_arrow_keys_repeat_and_stop_on_release(control, direction):
+    app, executor, frame, clock = control
+    app.detener_control()
+    app.configurar_gesto(app.estado_actual().id_perfil_seleccionado, 'dos_dedos', 'flechas', reemplazar_existente=True)
+    state = app.iniciar_control(camara_disponible=True, ancho_pantalla=1920, alto_pantalla=1080)
+    # Config changes create a new generation; exercise the current session directly.
+    def send(phase, time, arrow):
+        clock.ahora = time
+        event = EventoGesto('dos_dedos', phase, round(time*1000), 0, .99)
+        return app.procesar_reconocimiento(Reconocimiento(state.generacion, time, True,
+            eventos=(event,), direccion_flechas=arrow))
+    start = clock() + .1
+    send(FaseGesto.INICIO, start, direction)
+    send(FaseGesto.MANTENIMIENTO, start+.1, direction)
+    assert executor.press_key.call_count == 1
+    send(FaseGesto.MANTENIMIENTO, start+.5, direction)
+    assert executor.press_key.call_count == 2
+    send(FaseGesto.FIN, start+.6, direction)
+    executor.press_key.assert_called_with(direction)
+    executor.scroll.assert_not_called()
+
+
+def test_thumb_down_backspace_then_clear_once_and_rearm(control):
+    _, executor, frame, _ = control
+    frame('pulgar_abajo')
+    executor.press_key.assert_called_once_with('backspace')
+    for _ in range(50):
+        frame('pulgar_abajo', FaseGesto.MANTENIMIENTO)
+    assert [c.args[0] for c in executor.press_key.call_args_list] == ['backspace', 'borrar_todo']
+    frame('pulgar_abajo', FaseGesto.FIN)
+    frame('pulgar_abajo')
+    assert [c.args[0] for c in executor.press_key.call_args_list] == ['backspace', 'borrar_todo', 'backspace']
+
+
+def test_releasing_or_losing_hand_cancels_pending_clear(control):
+    app, executor, frame, clock = control
+    frame('pulgar_abajo')
+    frame('pulgar_abajo', FaseGesto.FIN)
+    clock.ahora += 3
+    frame('pulgar_abajo', FaseGesto.MANTENIMIENTO)
+    assert executor.press_key.call_count == 1
+    frame('pulgar_abajo')
+    clock.ahora += .05
+    app.procesar_reconocimiento(Reconocimiento(app.estado_actual().generacion, clock(), False))
+    clock.ahora += 3
+    frame('pulgar_abajo', FaseGesto.MANTENIMIENTO)
+    assert [c.args[0] for c in executor.press_key.call_args_list] == ['backspace', 'backspace']

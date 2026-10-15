@@ -25,7 +25,7 @@ class ProcesadorVision:
         self._posicion: tuple[float, float] | None = None
         self._centro_mano: tuple[float, float] | None = None
         self._ultimo_instante_ms = -1
-        self._lateralidad = None
+        self._ultimo_seguimiento_ms = -1000
 
     def procesar(self, fotograma: Fotograma, detector: DetectorManos) -> ResultadoVision:
         inicio_ns = perf_counter_ns()
@@ -57,14 +57,25 @@ class ProcesadorVision:
             if estado is EstadoVision.SIN_MANO and habia_datos:
                 estado = EstadoVision.MANO_PERDIDA
             return self.invalidar(instante_ms, estado, deteccion.mensaje)
-        # Either hand exposes the same commands. When both are visible, keep
-        # controlling with the current hand; use the profile only as a tie-break.
-        candidatas = deteccion.manos
-        if len(candidatas) > 1:
-            preferred = self._lateralidad or self.configuracion.mano_dominante
-            candidatas = tuple(m for m in candidatas if m.lateralidad is preferred)
+        # Only the profile-selected hand can control the application.
+        candidatas = tuple(m for m in deteccion.manos
+                           if m.lateralidad is self.configuracion.mano_dominante)
+        # Closing the hand can briefly confuse handedness. Preserve only the
+        # pending fist timer, never publish coordinates/actions for the other hand.
+        if (len(deteccion.manos) == 1 and self._reconocedor.esperando_puno
+                and self._centro_mano is not None
+                and instante_ms - self._ultimo_seguimiento_ms <= 150):
+            observada = deteccion.manos[0]
+            centro_observado = (observada.puntos[9].x, observada.puntos[9].y)
+            if ((not candidatas or observada.confianza_lateralidad < self.configuracion.umbral_lateralidad)
+                    and distancia(centro_observado, self._centro_mano) <= .04):
+                return ResultadoVision(
+                    instante_ms, EstadoVision.BAJA_CONFIANZA,
+                    mensaje="Confirmando la mano seleccionada; mantén el puño.")
         if not candidatas:
-            return self.invalidar(instante_ms, EstadoVision.SIN_MANO, "Presenta una mano.")
+            return self.invalidar(
+                instante_ms, EstadoVision.MANO_PERDIDA if habia_datos else EstadoVision.SIN_MANO,
+                "Presenta la mano seleccionada en el perfil.")
         if len(candidatas) != 1:
             return self.invalidar(
                 instante_ms,
@@ -72,11 +83,7 @@ class ProcesadorVision:
                 "Se detectaron varias manos con la misma lateralidad; muestra una sola.",
             )
         mano = candidatas[0]
-        if (self._lateralidad is not None and self._lateralidad is not mano.lateralidad
-                and mano.confianza_lateralidad >= self.configuracion.umbral_lateralidad):
-            return self.invalidar(instante_ms, EstadoVision.MANO_PERDIDA,
-                                  "Cambio de mano: reiniciando el gesto.")
-        if len(deteccion.manos) > 1 and mano.confianza_lateralidad < self.configuracion.umbral_lateralidad:
+        if mano.confianza_lateralidad < self.configuracion.umbral_lateralidad:
             return self.invalidar(
                 instante_ms,
                 EstadoVision.BAJA_CONFIANZA,
@@ -112,10 +119,9 @@ class ProcesadorVision:
         eventos = self._reconocedor.procesar(
             mano, instante_ms, relacion_aspecto, deteccion.en_espejo
         )
-        if mano.confianza_lateralidad >= self.configuracion.umbral_lateralidad:
-            self._lateralidad = mano.lateralidad
         self._posicion = posicion
         self._centro_mano = centro
+        self._ultimo_seguimiento_ms = instante_ms
         return ResultadoVision(
             instante_ms,
             EstadoVision.MANO_DETECTADA,
@@ -131,5 +137,5 @@ class ProcesadorVision:
         eventos = self._reconocedor.reiniciar(instante_ms)
         self._posicion = None
         self._centro_mano = None
-        self._lateralidad = None
+        self._ultimo_seguimiento_ms = -1000
         return ResultadoVision(instante_ms, estado, eventos=eventos, mensaje=mensaje)

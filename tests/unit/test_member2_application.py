@@ -29,7 +29,7 @@ class PruebasAplicacion(unittest.TestCase):
                               "id_gesto": gesto, "confianza": 0.95} | kwargs))
 
     def test_crear_perfil_incluye_valores_iniciales(self):
-        self.assertEqual(len(self.perfil.asignaciones), 15)
+        self.assertEqual(len(self.perfil.asignaciones), 16)
         self.assertIsNone(self.perfil.calibracion)
 
     def test_nombre_perfil_unico(self):

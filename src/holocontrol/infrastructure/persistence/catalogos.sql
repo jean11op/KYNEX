@@ -15,6 +15,8 @@ ON CONFLICT(id_tipo_accion) DO NOTHING;
 
 INSERT INTO Accion (id_accion, nombre, id_tipo_accion, cantidad)
 VALUES
+    ('flechas', 'Flechas en cuatro direcciones', 'tecla', 0),
+    ('borrar', 'Borrar texto (mantener: borrar todo)', 'tecla', 0),
     ('enter', 'Enter', 'tecla', 0),
     ('escape', 'Escape', 'tecla', 0),
     ('volumen_subir', 'Subir volumen', 'tecla', 0),
@@ -35,8 +37,9 @@ ON CONFLICT(id_accion) DO NOTHING;
 
 INSERT INTO Gesto (id_gesto, id_perfil, nombre, umbral_confianza)
 VALUES
+    ('pulgar_abajo', NULL, 'Meñique a la izquierda (borrar)', 0.6),
     ('indice', NULL, 'Índice extendido', 0.8),
-    ('menique', NULL, 'Solo menique (Enter)', 0.6),
+    ('menique', NULL, 'Meñique arriba (Enter)', 0.6),
     ('cuernos', NULL, 'Indice y menique (Escape)', 0.6),
     ('like', NULL, 'Pulgar arriba (voz)', 0.6),
     ('zoom', NULL, 'Separar o juntar dos dedos', 0.6),
@@ -57,3 +60,10 @@ WHERE id_gesto = 'puno' AND id_perfil IS NULL;
 
 UPDATE Gesto SET nombre = 'Pistola (mantener clic)', umbral_confianza = 0.6
 WHERE id_gesto = 'pellizco' AND id_perfil IS NULL;
+
+-- El identificador histórico conserva las asignaciones existentes.
+UPDATE Gesto SET nombre = 'Meñique a la izquierda (borrar)'
+WHERE id_gesto = 'pulgar_abajo' AND id_perfil IS NULL;
+
+UPDATE Gesto SET nombre = 'Meñique arriba (Enter)'
+WHERE id_gesto = 'menique' AND id_perfil IS NULL;

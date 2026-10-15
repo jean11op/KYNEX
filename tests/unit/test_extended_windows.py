@@ -84,7 +84,9 @@ def test_drag_uses_continuous_button_and_intermediate_points():
     with patch('holocontrol.infrastructure.windows.windows_action_executor.pyautogui') as api:
         api.position.return_value=(200,200)
         api.size.return_value=(1920,1080)
+        e._clock = Mock(return_value=0.0)
         e.begin_drag(500,500)
+        e._clock.return_value = 1/30
         e.update_pinch(550,520)
         assert api.moveTo.call_count > 2
         api.mouseDown.assert_called_once_with(button='left',_pause=False)
@@ -104,3 +106,43 @@ def test_keyboard_execution(key):
         with pytest.raises(RuntimeError):
             e.press_key(key)
         assert api.press.call_count == 1
+
+
+@pytest.mark.parametrize('fps', [20, 30, 60])
+def test_drawing_filters_tremor_but_tracks_deliberate_strokes(fps):
+    e = active()
+    e._clock = Mock(return_value=0.0)
+    with patch('holocontrol.infrastructure.windows.windows_action_executor.pyautogui') as api:
+        api.position.return_value = (500, 500)
+        api.size.return_value = (1920, 1080)
+        e.begin_drag(0, 0)
+        for frame in range(1, fps + 1):
+            e._clock.return_value = frame / fps
+            e.update_pinch(2 if frame % 2 else -2, 0)
+            assert abs(e._drag_position[0] - 500) < 1.5
+        for frame in range(1, fps + 1):
+            e._clock.return_value = 1 + frame / fps
+            e.update_pinch(round(150 * frame / fps), 0)
+        assert 640 < e._drag_position[0] <= 650
+        api.mouseDown.assert_called_once()
+        e.set_hand_detected(False)
+        api.mouseUp.assert_called_once()
+        api.click.assert_not_called()
+
+
+@pytest.mark.parametrize('key', ['up', 'down', 'left', 'right', 'backspace'])
+def test_navigation_and_delete_keys_are_single_presses(key):
+    e = active()
+    with patch('holocontrol.infrastructure.windows.windows_action_executor.pyautogui') as api:
+        e.press_key(key)
+        api.press.assert_called_once_with(key, _pause=False)
+        api.hotkey.assert_not_called()
+
+
+def test_clear_field_selects_all_then_deletes():
+    e = active()
+    with patch('holocontrol.infrastructure.windows.windows_action_executor.pyautogui') as api:
+        e.press_key('borrar_todo')
+        assert [c[0] for c in api.mock_calls] == ['hotkey', 'press']
+        api.hotkey.assert_called_once_with('ctrl', 'a', _pause=False)
+        api.press.assert_called_once_with('backspace', _pause=False)

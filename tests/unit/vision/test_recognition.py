@@ -88,11 +88,11 @@ def test_dos_dedos_informa_desplazamiento_vertical(crear_mano, crear_deteccion):
 @pytest.mark.parametrize(
     "lateralidad,confianza,estado",
     [
-        (Lateralidad.IZQUIERDA, 0.4, EstadoVision.BAJA_CONFIANZA),
+        (Lateralidad.IZQUIERDA, 0.4, EstadoVision.SIN_MANO),
         (Lateralidad.DERECHA, 0.4, EstadoVision.BAJA_CONFIANZA),
     ],
 )
-def test_single_hand_does_not_require_certain_handedness(
+def test_requires_selected_hand_with_certain_handedness(
     lateralidad,
     confianza,
     estado,
@@ -105,8 +105,8 @@ def test_single_hand_does_not_require_certain_handedness(
             0,
         )
     )
-    assert resultado.estado is EstadoVision.MANO_DETECTADA and resultado.es_valido
-    assert resultado.posicion_indice is not None
+    assert resultado.estado is estado and not resultado.es_valido
+    assert resultado.posicion_indice is None
 
 
 def test_dos_manos_no_cambian_el_control_a_la_no_dominante(crear_mano, crear_deteccion):

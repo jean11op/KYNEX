@@ -28,6 +28,8 @@ class GestoBasico(StrEnum):
     CUERNOS = "cuernos"
     INDICE = "indice"
     LIKE = "like"
+    # Historical ID for saved delete bindings: now little finger pointing left.
+    PULGAR_ABAJO = "pulgar_abajo"
     ZOOM = "zoom"
     PULGAR = "pulgar"
     PELLIZCO = "pellizco"

@@ -4,6 +4,7 @@ from unittest.mock import Mock
 
 import pytest
 
+from holocontrol.infrastructure.persistence.conexion import BaseDatos
 from holocontrol.bootstrap import crear_nucleo
 from holocontrol.bootstrap import seleccionar_camara
 from holocontrol.infrastructure.vision.errors import ErrorCamara
@@ -205,3 +206,17 @@ def test_old_pinch_click_migrates_once_to_thumb(tmp_path, enabled):
         thumb = [a for a in assignments if a.id_gesto == 'pulgar']
         assert len(thumb) == 1 and thumb[0].activo == enabled
         assert thumb[0].id_accion == 'clic_izquierdo'
+
+
+def test_existing_profiles_receive_arrows_and_delete_without_losing_fist(tmp_path):
+    path = tmp_path / 'upgrade.sqlite3'
+    first = crear_nucleo(path, ejecutor_existente=EjecutorSimulado(), proveedor_vision=ProveedorSimulado())
+    profile = first.repositorio.obtener(first.id_perfil)
+    first.aplicacion.configurar_gesto(profile.id, 'dos_dedos', 'desplazar_vertical', reemplazar_existente=True)
+    with BaseDatos(path).transaccion() as connection:
+        connection.execute("DELETE FROM AsignacionGesto WHERE id_gesto='pulgar_abajo'")
+    second = crear_nucleo(path, ejecutor_existente=EjecutorSimulado(), proveedor_vision=ProveedorSimulado())
+    bindings = {a.id_gesto: (a.id_accion, a.activo) for a in second.repositorio.obtener(profile.id).asignaciones}
+    assert bindings['dos_dedos'] == ('flechas', True)
+    assert bindings['pulgar_abajo'] == ('borrar', True)
+    assert bindings['puno'] == ('minimizar', True)
