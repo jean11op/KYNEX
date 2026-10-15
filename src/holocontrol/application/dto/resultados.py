@@ -16,3 +16,4 @@ class ResultadoGesto:
     ejecutado: bool
     motivo: str
     id_accion: str | None = None
+    resultados_eventos: tuple["ResultadoGesto", ...] = ()

@@ -243,12 +243,13 @@ class PruebasAplicacion(unittest.TestCase):
 
     def test_gesto_pausa_funciona(self):
         self.iniciar()
-        self.aplicacion.procesar_reconocimiento(self.fotograma("palma"))
+        self.aplicacion.procesar_reconocimiento(self.fotograma("palma_abierta"))
         self.assertEqual(self.aplicacion.estado_actual().estado, EstadoControl.PAUSED)
 
     def test_desplazamiento_y_clic_derecho(self):
+        self.aplicacion.configurar_gesto(self.perfil.id, "puno", "clic_derecho")
         self.iniciar()
-        self.aplicacion.procesar_reconocimiento(self.fotograma("dos_dedos"))
+        self.aplicacion.procesar_reconocimiento(self.fotograma("puno"))
         self.aplicacion.procesar_reconocimiento(self.fotograma("subir"))
         self.assertEqual(self.ejecutor.llamadas, [("clic_derecho",), ("desplazar", 3)])
 
@@ -257,7 +258,7 @@ class PruebasAplicacion(unittest.TestCase):
         self.aplicacion.editar_perfil(self.perfil.id, tiempo_espera_gesto_ms=2000)
         self.aplicacion.reanudar_control(camara_disponible=True)
         self.aplicacion.procesar_reconocimiento(self.fotograma("pellizco"))
-        resultado = self.aplicacion.procesar_reconocimiento(self.fotograma("dos_dedos"))
+        resultado = self.aplicacion.procesar_reconocimiento(self.fotograma("subir"))
         self.assertEqual(resultado.motivo, "tiempo_espera")
         self.assertEqual(len(self.ejecutor.llamadas), 1)
 

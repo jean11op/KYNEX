@@ -2,14 +2,18 @@ from dataclasses import dataclass
 from holocontrol.domain.errores import ErrorDominio
 from holocontrol.domain.rules.validacion import validar_numero, validar_entero, validar_texto
 
+from holocontrol.ports.vision.models import EstadoVision, EventoGesto, ResultadoVision
+
 
 @dataclass(frozen=True)
 class Reconocimiento:
     """Un resultado por fotograma, incluso si no se detecta mano o gesto.
 
-    generacion procede de iniciar_control/reanudar_control. Captured_at utiliza
+    generacion procede de iniciar_control/reanudar_control. instante_captura utiliza
     el mismo reloj monotónico del proceso. x/y son puntos normalizados crudos;
     la aplicación aplica calibración, sensibilidad y suavizado.
+    Los eventos tienen tiempos propios en milisegundos y se conservan en orden.
+    id_gesto/confianza permiten consumir el contrato anterior de un solo gesto.
     """
     generacion: int
     instante_captura: float
@@ -19,7 +23,52 @@ class Reconocimiento:
     x: float | None = None
     y: float | None = None
 
+
+    eventos: tuple[EventoGesto, ...] = ()
+    desplazamiento_vertical: float = 0.0
+    estado_vision: EstadoVision | None = None
+    mensaje: str = ""
+
+
+    @classmethod
+    def desde_vision(cls, resultado: ResultadoVision, generacion: int) -> "Reconocimiento":
+        """La generación es la del trabajador que produjo el resultado.
+
+        Nunca etiquetar resultados pendientes con la generación de una nueva sesión.
+        Convierte milisegundos a segundos y conserva el orden del proveedor.
+        """
+        posicion = resultado.posicion_indice
+        desplazamiento = resultado.desplazamiento_indice
+
+        return cls(
+            generacion=generacion,
+            instante_captura=resultado.instante_ms / 1000,
+            mano_detectada=resultado.es_valido,
+            x=posicion[0] if posicion else None,
+            y=posicion[1] if posicion else None,
+            eventos=resultado.eventos,
+            desplazamiento_vertical=desplazamiento[1] if desplazamiento else 0.0,
+            estado_vision=resultado.estado,
+            mensaje=resultado.mensaje,
+        )
+
     def __post_init__(self):
+
+        object.__setattr__(self, "eventos", tuple(self.eventos))
+
+        if any(not isinstance(evento, EventoGesto) for evento in self.eventos):
+            raise ErrorDominio("Los eventos deben cumplir el contrato de visión.")
+
+        if self.estado_vision is not None and not isinstance(self.estado_vision, EstadoVision):
+            raise ErrorDominio("Estado de visión inválido.")
+
+        validar_numero(
+            self.desplazamiento_vertical,
+            "Desplazamiento vertical",
+            -1,
+            1,
+        )
+
         validar_entero(self.generacion, "Generación", 0, 2**63 - 1)
         validar_numero(self.instante_captura, "Instante", 0, 1e15)
         validar_numero(self.confianza, "Confianza", 0, 1)

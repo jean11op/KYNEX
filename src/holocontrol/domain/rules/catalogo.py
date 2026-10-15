@@ -6,6 +6,7 @@ ACCIONES = (
     Accion("clic_derecho", "Clic derecho", TipoAccion.CLIC_DERECHO),
     Accion("desplazar_arriba", "Desplazar arriba", TipoAccion.DESPLAZAR, 3),
     Accion("desplazar_abajo", "Desplazar abajo", TipoAccion.DESPLAZAR, -3),
+    Accion("desplazar_vertical", "Desplazamiento vertical de la mano", TipoAccion.DESPLAZAR, 1),
     Accion("pausar", "Pausar control", TipoAccion.PAUSAR),
 )
 GESTOS = (
@@ -14,12 +15,20 @@ GESTOS = (
     Gesto("dos_dedos", "Dos dedos"),
     Gesto("subir", "Deslizar arriba"),
     Gesto("bajar", "Deslizar abajo"),
-    Gesto("palma", "Palma abierta"),
+    Gesto("palma_abierta", "Palma abierta"),
+    Gesto("puno", "Puño"),
+    Gesto("deslizamiento_izquierda", "Deslizamiento a la izquierda"),
+    Gesto("deslizamiento_derecha", "Deslizamiento a la derecha"),
 )
-PARES_PREDETERMINADOS = tuple(zip(
-    ("indice", "pellizco", "dos_dedos", "subir", "bajar", "palma"),
-    ("cursor", "clic_izquierdo", "clic_derecho", "desplazar_arriba", "desplazar_abajo", "pausar"),
-))
+# Los gestos sin función implementada quedan disponibles, sin asignación automática.
+PARES_PREDETERMINADOS = (
+    ("indice", "cursor"),
+    ("pellizco", "clic_izquierdo"),
+    ("dos_dedos", "desplazar_vertical"),
+    ("subir", "desplazar_arriba"),
+    ("bajar", "desplazar_abajo"),
+    ("palma_abierta", "pausar"),
+)
 
 
 # Genera las asignaciones predeterminadas de gestos a acciones para un perfil.

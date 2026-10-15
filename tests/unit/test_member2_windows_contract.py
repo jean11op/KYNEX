@@ -10,6 +10,7 @@ from holocontrol.application.services.adaptador_ejecutor_existente import Adapta
 from holocontrol.application.dto.reconocimiento import Reconocimiento
 from holocontrol.domain.entities import Calibracion
 from holocontrol.domain.value_objects.estado_control import EstadoControl
+from holocontrol.ports.vision.models import EventoGesto, FaseGesto
 from tests.soporte import RelojSimulado, RepositorioPerfilesMemoria
 
 
@@ -50,7 +51,18 @@ class PruebasContratoWindowsExistente(unittest.TestCase):
         self.api.moveTo.assert_called_once_with(1919, 0, duration=0)
 
     def test_adaptador_pausa_con_aplicacion(self):
-        self.enviar("palma")
+        self.enviar("palma_abierta")
         self.assertEqual(self.ejecutor._state, EstadoControl.PAUSED)
         self.enviar("pellizco")
+        self.api.click.assert_not_called()
+
+    def test_evento_scroll_llega_a_windows_por_el_adaptador(self):
+        instante = self.reloj.avanzar()
+        self.aplicacion.procesar_reconocimiento(Reconocimiento(
+            self.aplicacion.estado_actual().generacion, instante, True,
+            eventos=(EventoGesto("dos_dedos", FaseGesto.MANTENIMIENTO,
+                                 round(instante * 1000), 100, 0.99),),
+            desplazamiento_vertical=0.1,
+        ))
+        self.api.scroll.assert_called_once_with(-3)
         self.api.click.assert_not_called()

@@ -3,7 +3,10 @@ from holocontrol.application.dto.reconocimiento import Reconocimiento
 
 
 class FuenteReconocimiento(Protocol):
-    """Puerto para I3, coordinado por el punto de ensamblaje de I1/I5.
+    """Contrato anterior por callbacks, conservado por compatibilidad.
+
+    Para feature/vision-gestures se usa ProveedorVision y
+    AplicacionControl.consultar_vision(proveedor, generacion=generacion_del_trabajador).
 
     iniciar inicia un trabajador y retorna sin bloquear la UI. al_reconocer recibe
     incluso fotogramas sin mano. Nunca repetir resultados viejos. al_fallar

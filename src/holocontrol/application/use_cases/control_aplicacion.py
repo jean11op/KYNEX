@@ -15,6 +15,8 @@ from holocontrol.domain.rules.validacion import validar_entero, validar_texto
 from holocontrol.domain.value_objects.estado_control import EstadoControl
 from holocontrol.ports.repositories.repositorio_perfil import RepositorioPerfiles
 from holocontrol.ports.system_actions.ejecutor_control import EjecutorControl
+from holocontrol.ports.vision.models import EstadoVision, FaseGesto
+from holocontrol.ports.vision.vision_provider import ProveedorVision
 
 
 class AplicacionControl:
@@ -41,6 +43,11 @@ class AplicacionControl:
         self._ultimo_fotograma = float('-inf')
         self._ultima_accion = float('-inf')
         self._gesto_mantenido: str | None = None
+        self._gestos_activos: set[str] = set()
+        self._ultimo_evento = float('-inf')
+        self._eventos_del_instante: set[tuple[str, FaseGesto]] = set()
+        self._inicio_sesion = float('-inf')
+        self._resto_scroll = 0.0
         self._posicion: tuple[float, float] | None = None
         self._pantalla = (1, 1)
         self._acciones = {a.id: a for a in ACCIONES}
@@ -195,6 +202,10 @@ class AplicacionControl:
         self._posicion = None
         self._ultimo_fotograma = float('-inf')
         self._ultima_accion = float('-inf')
+        self._gestos_activos.clear()
+        self._ultimo_evento = float('-inf')
+        self._eventos_del_instante.clear()
+        self._resto_scroll = 0.0
 
     def _fallo_adaptador(self, causa: Exception) -> None:
         self._estado = EstadoControl.PAUSED
@@ -225,6 +236,7 @@ class AplicacionControl:
         self._generacion += 1
         self._reiniciar_deteccion()
         self._pantalla = (ancho_pantalla, alto_pantalla)
+        self._inicio_sesion = self._reloj()
         try:
             self._ejecutor.establecer_mano_detectada(False)
             self._ejecutor.activar()
@@ -239,6 +251,7 @@ class AplicacionControl:
         return self.estado_actual()
 
     def _validar_configuracion(self, perfil: Perfil) -> None:
+
         gestos = {g.id for g in GESTOS + perfil.gestos}
         if any(g.id in self._gestos for g in perfil.gestos):
             raise ErrorDominio("Un gesto personalizado usa un identificador reservado.")
@@ -310,6 +323,50 @@ class AplicacionControl:
         self._posicion = (x, y)
         return round(x * (self._pantalla[0] - 1)), round(y * (self._pantalla[1] - 1))
 
+    def _resolver_nombre_vision(self, nombre: str) -> str:
+        if nombre.startswith("personalizado:") and self._perfil_activo is not None:
+            nombre_propio = (
+                nombre.removeprefix("personalizado:")
+                .strip()
+                .casefold()
+            )
+
+            return next(
+                (
+                    gesto.id
+                    for gesto in self._perfil_activo.gestos
+                    if gesto.nombre.casefold() == nombre_propio
+                ),
+                nombre,
+            )
+        return nombre
+
+    def consultar_vision(self, proveedor: ProveedorVision, *, generacion: int) -> ResultadoGesto:
+        """Consulta sin espera. La generación pertenece al trabajador, no a la consulta.
+
+        El ensamblador debe detener/drenar el trabajador anterior antes de asociar
+        uno a una nueva generación. No se mantiene el bloqueo durante la consulta.
+        """
+        with self._bloqueo:
+            if generacion != self._generacion:
+                return ResultadoGesto(False, "generacion_anterior")
+            if self._estado is not EstadoControl.ACTIVE:
+                return ResultadoGesto(False, "control_inactivo")
+        try:
+            resultado = proveedor.obtener_resultado()
+            reconocimiento = (
+                Reconocimiento.desde_vision(resultado, generacion) if resultado is not None else None
+            )
+        except Exception as exc:
+            with self._bloqueo:
+                if generacion != self._generacion:
+                    return ResultadoGesto(False, "generacion_anterior")
+                self.informar_perdida_camara(f"Falló el proveedor de visión: {exc}")
+                return ResultadoGesto(False, "error_proveedor")
+        if reconocimiento is None:
+            return ResultadoGesto(False, "sin_resultado")
+        return self.procesar_reconocimiento(reconocimiento)
+
     def procesar_reconocimiento(self, fotograma: Reconocimiento) -> ResultadoGesto:
         with self._bloqueo:
             if self._estado is not EstadoControl.ACTIVE:
@@ -319,58 +376,129 @@ class AplicacionControl:
             ahora = self._reloj()
             if fotograma.instante_captura <= self._ultimo_fotograma:
                 return ResultadoGesto(False, "fotograma_fuera_de_orden")
+            if fotograma.instante_captura < self._inicio_sesion:
+                return ResultadoGesto(False, "fotograma_vencido")
+            # Los avisos de fallo bloquean incluso si su entrega sufrió retrasos.
+            if fotograma.estado_vision in (
+                EstadoVision.ERROR_CAMARA, EstadoVision.ERROR_PROCESAMIENTO, EstadoVision.DETENIDO,
+            ):
+                self.informar_perdida_camara(fotograma.mensaje or fotograma.estado_vision.value)
+                return ResultadoGesto(False, fotograma.estado_vision.value)
             if fotograma.instante_captura > ahora or ahora - fotograma.instante_captura > 0.25:
                 return ResultadoGesto(False, "fotograma_vencido")
             self._ultimo_fotograma = fotograma.instante_captura
+            if not self._camara:
+                return ResultadoGesto(False, "camara_no_disponible")
             try:
-                self._ejecutor.establecer_mano_detectada(fotograma.mano_detectada)
-                self._mano = fotograma.mano_detectada
-                if not fotograma.mano_detectada:
+                mano = fotograma.mano_detectada and fotograma.estado_vision in (
+                    None, EstadoVision.MANO_DETECTADA,
+                )
+                self._ejecutor.establecer_mano_detectada(mano)
+                self._mano = mano
+                if not mano:
                     self._gesto_mantenido = None
+                    self._gestos_activos.clear()
+                    self._resto_scroll = 0.0
                     self._posicion = None
                     return ResultadoGesto(False, "sin_mano")
-                perfil = self._perfil_activo
-                if perfil is None:
-                    raise ErrorControl("No hay una configuración activa.")
-                gesto = next((g for g in GESTOS + perfil.gestos
-                                if g.id == fotograma.id_gesto), None)
-                if gesto is None:
-                    if fotograma.id_gesto is None:
-                        self._gesto_mantenido = None
-                    return ResultadoGesto(False, "sin_gesto_valido")
-                if fotograma.confianza < gesto.umbral_confianza:
-                    return ResultadoGesto(False, "confianza_insuficiente")
-                asignacion = next((a for a in perfil.asignaciones
-                                   if a.id_gesto == gesto.id and a.activo), None)
-                if asignacion is None:
-                    return ResultadoGesto(False, "sin_asignacion_activa")
-                accion = self._acciones.get(asignacion.id_accion)
-                if accion is None:
-                    return ResultadoGesto(False, "accion_no_permitida")
-                continuo = accion.tipo is TipoAccion.MOVER_CURSOR
-                if not continuo and self._gesto_mantenido == gesto.id:
-                    return ResultadoGesto(False, "gesto_mantenido", accion.id)
-                if not continuo and accion.tipo is not TipoAccion.PAUSAR:
-                    if ahora - self._ultima_accion < perfil.tiempo_espera_gesto_ms / 1000:
-                        self._gesto_mantenido = gesto.id
-                        return ResultadoGesto(False, "tiempo_espera", accion.id)
-                if accion.tipo is TipoAccion.MOVER_CURSOR:
-                    if perfil.calibracion is None or fotograma.x is None:
-                        return ResultadoGesto(False, "sin_coordenadas_o_calibracion", accion.id)
-                    self._ejecutor.mover_cursor(*self._posicion_cursor(fotograma, perfil.calibracion))
-                elif accion.tipo is TipoAccion.CLIC_IZQUIERDO:
-                    self._ejecutor.clic_izquierdo()
-                elif accion.tipo is TipoAccion.CLIC_DERECHO:
-                    self._ejecutor.clic_derecho()
-                elif accion.tipo is TipoAccion.DESPLAZAR:
-                    self._ejecutor.desplazar(accion.cantidad)
-                elif accion.tipo is TipoAccion.PAUSAR:
-                    self.pausar_control()
-                if self._estado is EstadoControl.ACTIVE:
-                    self._gesto_mantenido = gesto.id
-                    if not continuo:
-                        self._ultima_accion = ahora
-                return ResultadoGesto(True, "accion_enviada", accion.id)
+                if fotograma.eventos:
+                    resultados = []
+                    scroll_consumido = False
+                    for evento in fotograma.eventos:
+                        if self._estado is not EstadoControl.ACTIVE:
+                            resultados.append(ResultadoGesto(False, "control_inactivo"))
+                            continue
+                        instante = evento.instante_ms / 1000
+                        clave = (evento.nombre, evento.fase)
+                        if instante < self._inicio_sesion or instante < self._ultimo_evento:
+                            resultados.append(ResultadoGesto(False, "evento_fuera_de_orden"))
+                            continue
+                        if instante > fotograma.instante_captura:
+                            resultados.append(ResultadoGesto(False, "evento_futuro"))
+                            continue
+                        if instante == self._ultimo_evento and clave in self._eventos_del_instante:
+                            resultados.append(ResultadoGesto(False, "evento_duplicado"))
+                            continue
+                        if instante > self._ultimo_evento:
+                            self._eventos_del_instante.clear()
+                        self._ultimo_evento = instante
+                        self._eventos_del_instante.add(clave)
+                        nombre = self._resolver_nombre_vision(evento.nombre)
+                        if evento.fase is FaseGesto.FIN:
+                            self._gestos_activos.discard(nombre)
+                            self._resto_scroll = 0.0
+                            resultados.append(ResultadoGesto(False, "fin_gesto"))
+                            continue
+                        if ahora - instante > 0.25:
+                            resultados.append(ResultadoGesto(False, "evento_vencido"))
+                            continue
+                        dato = replace(fotograma, id_gesto=nombre, confianza=evento.confianza,
+                                       desplazamiento_vertical=(0 if scroll_consumido
+                                                                else fotograma.desplazamiento_vertical))
+                        resultado = self._procesar_gesto(dato, instante, evento.fase)
+                        resultados.append(resultado)
+                        if resultado.id_accion == "desplazar_vertical":
+                            scroll_consumido = True
+                    resumen = next((r for r in reversed(resultados) if r.ejecutado), resultados[-1])
+                    return replace(resumen, resultados_eventos=tuple(resultados))
+                # Un lote vacío no significa FIN: visión entrega transiciones explícitas.
+                return self._procesar_gesto(fotograma, ahora)
             except Exception as exc:
                 self._fallo_adaptador(exc)
                 raise ErrorControl(self._error) from exc
+
+    def _procesar_gesto(self, fotograma: Reconocimiento, instante: float,
+                        fase: FaseGesto | None = None) -> ResultadoGesto:
+        perfil = self._perfil_activo
+        if perfil is None:
+            raise ErrorControl("No hay una configuración activa.")
+        nombre = self._resolver_nombre_vision(fotograma.id_gesto or "")
+        gesto = next((g for g in GESTOS + perfil.gestos if g.id == nombre), None)
+        if gesto is None:
+            if fotograma.id_gesto is None:
+                self._gesto_mantenido = None
+            return ResultadoGesto(False, "sin_gesto_valido")
+        if fotograma.confianza < gesto.umbral_confianza:
+            return ResultadoGesto(False, "confianza_insuficiente")
+        asignacion = next((a for a in perfil.asignaciones
+                           if a.id_gesto == gesto.id and a.activo), None)
+        if asignacion is None:
+            return ResultadoGesto(False, "sin_asignacion_activa")
+        accion = self._acciones[asignacion.id_accion]
+        continuo = accion.tipo is TipoAccion.MOVER_CURSOR or accion.id == "desplazar_vertical"
+        if not continuo:
+            if fase is not None:
+                if fase is not FaseGesto.INICIO or gesto.id in self._gestos_activos:
+                    return ResultadoGesto(False, "gesto_mantenido", accion.id)
+                self._gestos_activos.add(gesto.id)
+            elif self._gesto_mantenido == gesto.id:
+                return ResultadoGesto(False, "gesto_mantenido", accion.id)
+            if accion.tipo is not TipoAccion.PAUSAR:
+                if instante - self._ultima_accion < perfil.tiempo_espera_gesto_ms / 1000:
+                    self._gesto_mantenido = gesto.id
+                    return ResultadoGesto(False, "tiempo_espera", accion.id)
+        if accion.tipo is TipoAccion.MOVER_CURSOR:
+            if perfil.calibracion is None or fotograma.x is None:
+                return ResultadoGesto(False, "sin_coordenadas_o_calibracion", accion.id)
+            self._ejecutor.mover_cursor(*self._posicion_cursor(fotograma, perfil.calibracion))
+        elif accion.tipo is TipoAccion.CLIC_IZQUIERDO:
+            self._ejecutor.clic_izquierdo()
+        elif accion.tipo is TipoAccion.CLIC_DERECHO:
+            self._ejecutor.clic_derecho()
+        elif accion.id == "desplazar_vertical":
+            # y crece hacia abajo; Windows usa cantidades negativas para bajar.
+            self._resto_scroll -= fotograma.desplazamiento_vertical * 30
+            cantidad = int(self._resto_scroll)
+            self._resto_scroll -= cantidad
+            if not cantidad:
+                return ResultadoGesto(False, "sin_desplazamiento", accion.id)
+            self._ejecutor.desplazar(cantidad)
+        elif accion.tipo is TipoAccion.DESPLAZAR:
+            self._ejecutor.desplazar(accion.cantidad)
+        elif accion.tipo is TipoAccion.PAUSAR:
+            self.pausar_control()
+        if self._estado is EstadoControl.ACTIVE:
+            self._gesto_mantenido = gesto.id
+            if not continuo:
+                self._ultima_accion = instante
+        return ResultadoGesto(True, "accion_enviada", accion.id)
