@@ -2,7 +2,7 @@ from typing import Protocol
 from holocontrol.domain.entities import Perfil
 
 """ Almacena el agregado completo sin compartir objetos mutables.
-    guardar es atómico: perfil, calibración, ajustes, gestos y asignaciones se
+    crear y actualizar son atómicos: perfil, calibración, ajustes, gestos y asignaciones se
     confirman juntos o no se modifica nada. Exigir nombre único con strip y
     casefold dentro del ámbito local. eliminar elimina todos los dependientes.
     SQLite debe cumplir esta atomicidad usando una transacción.

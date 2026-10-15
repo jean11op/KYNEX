@@ -37,14 +37,6 @@ class RepositorioPerfilesMemoria:
     def obtener(self, id_perfil):
         return self.perfiles.get(id_perfil)
 
-    def guardar(self, perfil):
-        if self.fallar_guardado:
-            raise OSError("Almacenamiento no disponible")
-        if any(p.id != perfil.id and p.nombre.casefold() == perfil.nombre.casefold()
-               for p in self.perfiles.values()):
-            raise ErrorConflicto("Nombre duplicado")
-        self.perfiles[perfil.id] = perfil
-
     def eliminar(self, id_perfil):
         if id_perfil not in self.perfiles:
             raise ErrorNoEncontrado("Perfil inexistente")
