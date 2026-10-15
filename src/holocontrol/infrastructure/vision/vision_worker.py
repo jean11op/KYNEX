@@ -2,6 +2,7 @@ import logging
 from collections import deque
 from collections.abc import Callable
 from dataclasses import replace
+from math import isfinite
 from threading import Condition, Event, Lock, Thread
 from time import monotonic, monotonic_ns
 from typing import Self
@@ -13,7 +14,7 @@ from holocontrol.infrastructure.vision.hand_detector import DetectorMediaPipe
 from holocontrol.infrastructure.vision.vision_processor import ProcesadorVision
 from holocontrol.ports.vision.models import (
     EstadoVision,
-    FaseGesto,
+    EventoGesto,
     Fotograma,
     PlantillaGesto,
     ResultadoVision,
@@ -44,7 +45,9 @@ class AdaptadorVision:
         self._parada = Event()
         self._hilo: Thread | None = None
         self._ultimo: ResultadoVision | None = None
-        self._pendientes: deque = deque()
+        self._pendientes: deque[EventoGesto] = deque()
+        self._desplazamiento_pendiente: tuple[float, float] | None = None
+        self._camara_disponible = False
         self._version = 0
         self._version_consumida = 0
         self._caducidad_informada = False
@@ -55,6 +58,24 @@ class AdaptadorVision:
     def en_ejecucion(self) -> bool:
         return self._hilo is not None and self._hilo.is_alive()
 
+    @property
+    def estado(self) -> EstadoVision:
+        with self._condicion:
+            if self._ultimo is None:
+                return EstadoVision.DETENIDO
+            if (
+                self._ultimo.es_valido
+                and monotonic_ns() // 1_000_000 - self._ultimo.instante_ms
+                > self.configuracion.vigencia_ms
+            ):
+                return EstadoVision.MANO_PERDIDA
+            return self._ultimo.estado
+
+    @property
+    def camara_disponible(self) -> bool:
+        with self._condicion:
+            return self._camara_disponible and not self._parada.is_set()
+
     def iniciar(self) -> None:
         with self._ciclo:
             if self.en_ejecucion:
@@ -62,12 +83,12 @@ class AdaptadorVision:
                     raise RuntimeError("El hilo anterior todavía está cerrando la cámara.")
                 return
             with self._condicion:
-                self._ultimo = None
-                self._pendientes.clear()
-                self._version = self._version_consumida = 0
                 self._caducidad_informada = False
+                self._camara_disponible = False
+                self._desplazamiento_pendiente = None
                 self._fotograma_previo = None
-            self._parada.clear()
+                self._parada.clear()
+                self._publicar(ResultadoVision(monotonic_ns() // 1_000_000, EstadoVision.INICIANDO))
             self._hilo = Thread(target=self._ejecutar, name="kinex-vision", daemon=True)
             self._hilo.start()
 
@@ -91,33 +112,36 @@ class AdaptadorVision:
                 return None
             return Fotograma(fotograma.imagen.copy(), fotograma.instante_ms, fotograma.en_espejo)
 
-    def _publicar(self, resultado: ResultadoVision) -> bool:
-        continuidad = True
+    def _publicar(self, resultado: ResultadoVision) -> None:
         with self._condicion:
-            if not resultado.es_valido:
-                self._pendientes = deque(
-                    evento for evento in self._pendientes if evento.fase is FaseGesto.FIN
-                )
-            self._pendientes.extend(
-                evento for evento in resultado.eventos if evento.fase is not FaseGesto.MANTENIMIENTO
-            )
-            if len(self._pendientes) > 64:
-                continuidad = False
-                self._pendientes.clear()
+            if self._parada.is_set() and resultado.estado not in (
+                EstadoVision.DETENIENDO,
+                EstadoVision.DETENIDO,
+                EstadoVision.ERROR_CAMARA,
+                EstadoVision.ERROR_PROCESAMIENTO,
+            ):
+                # Conserva eventos calculados durante el cierre, sin reactivar coordenadas.
                 resultado = ResultadoVision(
-                    resultado.instante_ms,
-                    EstadoVision.MANO_PERDIDA,
-                    mensaje="El consumidor no procesó los eventos a tiempo; reinicia el control.",
+                    max(monotonic_ns() // 1_000_000, resultado.instante_ms),
+                    EstadoVision.DETENIENDO,
+                    eventos=resultado.eventos,
                 )
+            self._pendientes.extend(resultado.eventos)
+            if resultado.es_valido and resultado.desplazamiento_indice is not None:
+                anterior = self._desplazamiento_pendiente or (0.0, 0.0)
+                self._desplazamiento_pendiente = tuple(
+                    a + b for a, b in zip(anterior, resultado.desplazamiento_indice)
+                )
+            elif not resultado.es_valido:
+                self._desplazamiento_pendiente = None
             self._ultimo = resultado
             self._version += 1
             self._caducidad_informada = False
             self._condicion.notify_all()
-        return continuidad
 
     def obtener_resultado(self, espera_s: float = 0.0) -> ResultadoVision | None:
-        if espera_s < 0:
-            raise ValueError("La espera no puede ser negativa.")
+        if not isfinite(espera_s) or espera_s < 0:
+            raise ValueError("La espera debe ser finita y no negativa.")
         with self._condicion:
             limite = monotonic() + espera_s
             while self._version == self._version_consumida:
@@ -136,13 +160,10 @@ class AdaptadorVision:
             resultado = self._ultimo
             self._version_consumida = self._version
             ahora_ms = monotonic_ns() // 1_000_000
-            eventos = tuple(
-                evento
-                for evento in self._pendientes
-                if evento.fase is FaseGesto.FIN
-                or ahora_ms - evento.instante_ms <= self.configuracion.vigencia_ms
-            )
+            eventos = tuple(self._pendientes)
             self._pendientes.clear()
+            desplazamiento = self._desplazamiento_pendiente
+            self._desplazamiento_pendiente = None
             if (
                 resultado.es_valido
                 and ahora_ms - resultado.instante_ms > self.configuracion.vigencia_ms
@@ -151,20 +172,40 @@ class AdaptadorVision:
                 return ResultadoVision(
                     ahora_ms,
                     EstadoVision.MANO_PERDIDA,
-                    eventos=tuple(evento for evento in eventos if evento.fase is FaseGesto.FIN),
+                    eventos=eventos,
                     mensaje="No llegaron datos de cámara recientes. Suspende las acciones gestuales.",
                 )
-            mantenimiento = tuple(
-                evento for evento in resultado.eventos if evento.fase is FaseGesto.MANTENIMIENTO
+            return replace(
+                resultado,
+                eventos=eventos,
+                desplazamiento_indice=desplazamiento if resultado.es_valido else None,
             )
-            return replace(resultado, eventos=eventos + mantenimiento)
 
     def detener(self, espera_s: float = 2.0) -> bool:
-        if espera_s < 0:
-            raise ValueError("La espera no puede ser negativa.")
+        if not isfinite(espera_s) or espera_s < 0:
+            raise ValueError("La espera debe ser finita y no negativa.")
         with self._ciclo:
-            self._parada.set()
             hilo = self._hilo
+            with self._condicion:
+                self._parada.set()
+                self._camara_disponible = False
+                if hilo is not None and hilo.is_alive():
+                    if self.estado not in (
+                        EstadoVision.DETENIDO,
+                        EstadoVision.ERROR_CAMARA,
+                        EstadoVision.ERROR_PROCESAMIENTO,
+                    ):
+                        self._publicar(
+                            ResultadoVision(monotonic_ns() // 1_000_000, EstadoVision.DETENIENDO)
+                        )
+                elif self._ultimo is None or self.estado not in (
+                    EstadoVision.DETENIDO,
+                    EstadoVision.ERROR_CAMARA,
+                    EstadoVision.ERROR_PROCESAMIENTO,
+                ):
+                    self._publicar(
+                        ResultadoVision(monotonic_ns() // 1_000_000, EstadoVision.DETENIDO)
+                    )
             if hilo is not None:
                 hilo.join(espera_s)
             finalizado = hilo is None or not hilo.is_alive()
@@ -188,6 +229,12 @@ class AdaptadorVision:
             camara = self._crear_camara()
             detector = self._crear_detector()
             camara.abrir()
+            with self._condicion:
+                self._camara_disponible = not self._parada.is_set()
+                if self._camara_disponible:
+                    self._publicar(
+                        ResultadoVision(monotonic_ns() // 1_000_000, EstadoVision.CAMARA_DISPONIBLE)
+                    )
             while not self._parada.is_set():
                 fotograma = camara.leer()
                 if self._parada.is_set():
@@ -200,9 +247,7 @@ class AdaptadorVision:
                             fotograma.en_espejo,
                         )
                 resultado = procesador.procesar(fotograma, detector)
-                # Un resultado finalizado después de solicitar cierre no debe reactivar acciones.
-                if not self._parada.is_set() and not self._publicar(resultado):
-                    procesador.invalidar(resultado.instante_ms, EstadoVision.MANO_PERDIDA)
+                self._publicar(resultado)
         except ErrorCamara as error:
             estado_final, mensaje = EstadoVision.ERROR_CAMARA, str(error)
             registro.warning("Error de cámara: %s", error)
@@ -212,7 +257,18 @@ class AdaptadorVision:
             registro.exception("Error en el procesamiento de visión")
         finally:
             with self._condicion:
+                self._camara_disponible = False
                 self._fotograma_previo = None
+                if estado_final is not EstadoVision.DETENIDO:
+                    self._parada.set()
+                    instante_ms = monotonic_ns() // 1_000_000
+                    resultado_error = (
+                        procesador.invalidar(instante_ms, estado_final, mensaje)
+                        if procesador is not None
+                        else ResultadoVision(instante_ms, estado_final, mensaje=mensaje)
+                    )
+                    # Comunica el fallo antes de cerrar recursos nativos que pueden bloquear.
+                    self._publicar(resultado_error)
             for recurso in (detector, camara):
                 if recurso is not None:
                     try:

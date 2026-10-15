@@ -10,6 +10,8 @@ class Lateralidad(StrEnum):
 
 
 class EstadoVision(StrEnum):
+    INICIANDO = "iniciando"
+    CAMARA_DISPONIBLE = "camara_disponible"
     MANO_DETECTADA = "mano_detectada"
     SIN_MANO = "sin_mano"
     MANO_PERDIDA = "mano_perdida"
@@ -17,6 +19,7 @@ class EstadoVision(StrEnum):
     BAJA_CONFIANZA = "baja_confianza"
     ERROR_CAMARA = "error_camara"
     ERROR_PROCESAMIENTO = "error_procesamiento"
+    DETENIENDO = "deteniendo"
     DETENIDO = "detenido"
 
 
@@ -122,6 +125,8 @@ class EventoGesto:
 
 @dataclass(frozen=True, slots=True)
 class ResultadoVision:
+    """Estado reciente y eventos pendientes; el historial no autoriza acciones."""
+
     instante_ms: int
     estado: EstadoVision
     mano: ManoDetectada | None = None
@@ -149,18 +154,56 @@ class ResultadoVision:
             self.mano is not None
             or self.posicion_indice is not None
             or self.desplazamiento_indice is not None
-            or any(evento.fase is not FaseGesto.FIN for evento in self.eventos)
         ):
-            raise ValueError("Un resultado inválido solo puede comunicar eventos de fin.")
+            raise ValueError("Un resultado inválido no puede conservar datos de una mano.")
         if self.posicion_indice is not None and (
             len(self.posicion_indice) != 2
             or any(not isfinite(valor) or not 0 <= valor <= 1 for valor in self.posicion_indice)
         ):
             raise ValueError("La posición del índice necesita dos coordenadas entre 0 y 1.")
+        if self.desplazamiento_indice is not None and (
+            len(self.desplazamiento_indice) != 2
+            or any(not isfinite(valor) for valor in self.desplazamiento_indice)
+        ):
+            raise ValueError("El desplazamiento necesita dos valores finitos.")
+        if any(evento.instante_ms > self.instante_ms for evento in self.eventos) or any(
+            anterior.instante_ms > siguiente.instante_ms
+            for anterior, siguiente in zip(self.eventos, self.eventos[1:])
+        ):
+            raise ValueError("Los eventos deben estar ordenados y no ser posteriores al resultado.")
 
     @property
     def es_valido(self) -> bool:
         return self.estado is EstadoVision.MANO_DETECTADA and self.mano is not None
+
+    @property
+    def mano_detectada(self) -> bool:
+        return self.es_valido
+
+    @property
+    def camara_disponible(self) -> bool:
+        return self.estado in (
+            EstadoVision.CAMARA_DISPONIBLE,
+            EstadoVision.MANO_DETECTADA,
+            EstadoVision.SIN_MANO,
+            EstadoVision.MANO_PERDIDA,
+            EstadoVision.MANO_NO_SELECCIONADA,
+            EstadoVision.BAJA_CONFIANZA,
+        )
+
+    @property
+    def desplazamiento_vertical(self) -> float | None:
+        return self.desplazamiento_indice[1] if self.desplazamiento_indice is not None else None
+
+    @property
+    def eventos_actuales(self) -> tuple[EventoGesto, ...]:
+        """Eventos del último fotograma; sin mano válida solo expone su fin."""
+        return tuple(
+            evento
+            for evento in self.eventos
+            if evento.instante_ms == self.instante_ms
+            and (self.es_valido or evento.fase is FaseGesto.FIN)
+        )
 
 
 def validar_instante(instante_ms: int) -> None:

@@ -28,6 +28,7 @@ La visión informa señales. La aplicación decide la acción y si puede ejecuta
 | --- | --- |
 | `ports/vision/models.py` | Datos inmutables y enumeraciones sin importar OpenCV, NumPy, MediaPipe o Qt |
 | `ports/vision/vision_provider.py` | Protocolos de cámara, detector, proveedor en segundo plano y entrenamiento |
+| `ports/vision/__init__.py` | Exportación pública del proveedor, estados y datos de visión |
 | `infrastructure/vision/camera.py` | Apertura, lectura, espejo y liberación de webcam |
 | `infrastructure/vision/hand_detector.py` | Conversión BGR/RGB y adaptación de MediaPipe Tasks VIDEO |
 | `infrastructure/vision/geometry.py` | Geometría de puntos, puntuación de dedos y descriptor normalizado |
@@ -76,17 +77,21 @@ La creación de entornos requiere internet para instalar bibliotecas. Una vez in
 
 `ResultadoVision` entrega:
 
-- `instante_ms`: reloj monotónico en milisegundos, no fecha UTC. Los instantes aumentan estrictamente.
-- `estado` y `es_valido`: presencia, pérdida, lateralidad no elegida, baja confianza, errores o detención.
+- `instante_ms`: reloj monotónico en milisegundos, no fecha UTC. Los instantes de fotogramas aumentan estrictamente; los cambios de ciclo pueden ocurrir en el mismo milisegundo.
+- `estado`, `es_valido` y `mano_detectada`: estado reciente y presencia de una mano seleccionada válida. `mano_detectada` equivale a `es_valido`; nunca describe una mano anterior conservada en el historial.
+- `camara_disponible`: el estado reciente informa una cámara abierta sin un error terminal; no garantiza presencia de mano ni vigencia de coordenadas.
 - `mano`: 21 puntos ordenados del 0 al 20, lateralidad física y `confianza_lateralidad`.
 - `posicion_indice`: coordenadas suavizadas entre 0 y 1; el origen está en la esquina superior izquierda.
-- `desplazamiento_indice`: diferencia respecto al resultado válido anterior; positivo en y significa hacia abajo.
-- `eventos`: nombre, fase `inicio`/`mantenimiento`/`fin`, instante, duración desde el inicio confirmado y puntuación.
+- `desplazamiento_indice` y `desplazamiento_vertical`: desplazamiento normalizado acumulado desde la última consulta al proveedor dentro del mismo seguimiento. `desplazamiento_vertical` es su componente y; positivo significa hacia abajo. Se reinicia al consumir, perder la mano, iniciar o cerrar. El procesador utilizado directamente entrega el delta entre fotogramas.
+- `eventos`: todos los eventos pendientes en orden de generación, con nombre, fase `inicio`/`mantenimiento`/`fin`, instante, duración desde el inicio confirmado y puntuación. Incluye historial anterior a una pérdida, error o cierre; se entrega una vez.
+- `eventos_actuales`: eventos del último fotograma, distinguidos del historial acumulado. Con un resultado inválido solo expone el fin generado en ese instante.
 - `latencia_procesamiento_ms`: detección y procesamiento de ese fotograma.
 - `latencia_total_ms`: tiempo desde la entrega del fotograma al proceso hasta obtener el resultado; no es latencia física cámara-acción.
 - `mensaje`: orientación o descripción del problema.
 
 MediaPipe no expone aquí una probabilidad de presencia por mano. Sus umbrales de detección, presencia y seguimiento se aplican dentro del detector. La confianza de lateralidad solo clasifica izquierda/derecha. La puntuación de los gestos básicos es geométrica y la de un gesto propio es similitud con su plantilla; ninguna equivale a una precisión de reconocimiento medida.
+
+`ResultadoVision` valida coordenadas entre 0 y 1, deltas finitos y eventos ordenados que no sean posteriores al resultado. Una mano perdida, error o detención no admite coordenadas ni puntos de mano vigentes, aunque conserve eventos históricos.
 
 El valor z es profundidad relativa a la muñeca, puede ser negativo y no es una coordenada de pantalla. Se rechazan puntos no finitos, incompletos o fuera de imagen. El detector utiliza el tamaño real del fotograma para corregir distancias y ángulos por relación de aspecto.
 
@@ -98,7 +103,7 @@ La implementación de visión depende de contratos de `ports/vision`. Los contra
 
 ```python
 from holocontrol.infrastructure.vision import AdaptadorVision, ConfiguracionVision
-from holocontrol.ports.vision.vision_provider import ProveedorVision
+from holocontrol.ports.vision import ProveedorVision
 
 proveedor: ProveedorVision = AdaptadorVision(ConfiguracionVision())
 proveedor.iniciar()
@@ -106,7 +111,11 @@ proveedor.iniciar()
 # En un temporizador de la interfaz o en el coordinador de aplicación:
 resultado = proveedor.obtener_resultado()  # No bloquea: espera por defecto de cero.
 if resultado is not None:
-    print(resultado.estado, resultado.posicion_indice, resultado.eventos)
+    print(resultado.estado, resultado.camara_disponible, resultado.mano_detectada)
+    for evento in resultado.eventos:
+        print(evento.nombre, evento.fase, evento.confianza, evento.instante_ms)
+    if resultado.es_valido:
+        print(resultado.posicion_indice, resultado.desplazamiento_vertical)
 
 finalizado = proveedor.detener()
 if not finalizado:
@@ -114,6 +123,25 @@ if not finalizado:
 ```
 
 El ejemplo muestra el intercambio de datos; la aplicación debe implementar la validación y ejecución mediante sus propios contratos. No se debe llamar `iniciar()` en cada actualización de ventana. Se inicia una vez y se consulta periódicamente, por ejemplo desde un `QTimer` de 16–33 ms. El hilo no llama widgets ni callbacks de Qt.
+
+`ProveedorVision` sigue siendo el responsable de obtener resultados de cámara. Usa un solo coordinador como consumidor de `obtener_resultado()` y distribuye el objeto inmutable obtenido a aplicación e interfaz. Cada consulta drena la cola: dos consumidores independientes repartirían los eventos entre sí. `espera_s=0` consulta sin esperar datos nuevos; `None` indica que no hay novedades. Las propiedades `estado`, `en_ejecucion` y `camara_disponible` pueden consultarse sin drenar eventos.
+
+### Estados de cámara y trabajador
+
+| `EstadoVision` | Significado para integración |
+| --- | --- |
+| `INICIANDO` | Se inició el trabajador; aún no se confirmó la apertura de cámara |
+| `CAMARA_DISPONIBLE` | Cámara abierta; todavía puede no existir un fotograma procesado |
+| `MANO_DETECTADA` | Mano seleccionada válida y coordenadas recientes |
+| `SIN_MANO` | Se procesa cámara, sin una mano detectada |
+| `MANO_PERDIDA` | Se perdió el seguimiento o caducaron los datos; sin coordenadas |
+| `MANO_NO_SELECCIONADA` / `BAJA_CONFIANZA` | No hay una mano admitida para control; sin coordenadas |
+| `ERROR_CAMARA` | Fallo de apertura/lectura o timeout al detener; mensaje con la causa |
+| `ERROR_PROCESAMIENTO` | Fallo de modelo, procesamiento o liberación de recursos |
+| `DETENIENDO` | Cierre solicitado, acciones gestuales invalidadas; el hilo puede seguir liberando recursos |
+| `DETENIDO` | Cierre normal completado; cámara y detector liberados |
+
+El estado inicial del proveedor es `DETENIDO`. `camara_disponible` se confirma después de `abrir()` y permanece independiente de que haya una mano. Los estados transitorios pueden ser sustituidos por el siguiente resultado antes de una consulta; utiliza la propiedad de disponibilidad para comprobar la apertura. `en_ejecucion` indica si el hilo sigue vivo, incluso mientras completa un cierre. Un error queda expuesto hasta iniciar otro ciclo. Si se solicita cierre, `camara_disponible` pasa a `False` de inmediato y ningún resultado que termine después puede reactivar coordenadas.
 
 Para calibración o una vista opcional, llama `activar_vista_previa(True)` y consulta `obtener_fotograma()`. Devuelve una copia del último fotograma BGR reciente, sin abrir otra cámara. La conversión a `QImage` y su visualización corresponden a presentación. La vista previa permanece desactivada por defecto, conserva como máximo una imagen en memoria y la descarta al desactivarse o detenerse; nunca escribe archivos. Puede mostrar la cámara aunque todavía no se detecte una mano.
 
@@ -132,17 +160,31 @@ Esa rama importa `pyautogui`, dependencia que todavía no aparece en `develop`. 
 
 La pausa no detiene obligatoriamente la percepción: puede seguir reconociéndose la palma que solicita reanudación. El dominio impide mover/clicar/dibujar mientras esté pausado. Detener la aplicación sí requiere cerrar cámara y detector.
 
-La rama de dominio `f5f3e8d` utiliza una asignación diferente para `dos_dedos` y el identificador `palma` para la palma abierta. Antes de conectar acciones reales, aplicación debe resolver esa correspondencia con el catálogo aprobado de visión; la diferencia y los campos del nuevo perfil están detallados en la ficha de validación. Este módulo conserva el comportamiento aprobado por el usuario.
+La rama de aplicación/dominio revisada en `c0d8c96` utiliza una asignación diferente para `dos_dedos` y el identificador `palma` para la palma abierta. Antes de conectar acciones reales, aplicación debe resolver esa correspondencia con el catálogo aprobado de visión; la diferencia y los campos del perfil están detallados en la ficha de validación. Este módulo conserva el comportamiento aprobado por el usuario.
+
+Esa rama también publica `FuenteReconocimiento`, basada en callbacks, y `Reconocimiento`, un DTO de un gesto por fotograma. No sustituyen el contrato de consulta `ProveedorVision` solicitado para esta entrega. El coordinador de I1/I5 debe conectar ambos contratos y conservar el historial de visión por separado, ya que el DTO de aplicación no tiene campos de fase ni lista de eventos.
+
+| Campo de aplicación | Correspondencia con visión |
+| --- | --- |
+| `generacion` | Generación vigente entregada por `AplicacionControl`; no se inventa desde visión |
+| `instante_captura` | `resultado.instante_ms / 1000`, en el mismo reloj monotónico |
+| `mano_detectada` | `resultado.mano_detectada` |
+| `x`, `y` | Puntos crudos normalizados `resultado.mano.puntos[8].x/y` si hay mano válida; aplicación aplica su calibración y suavizado |
+| `id_gesto`, `confianza` | Gesto vigente y puntuación de `eventos_actuales`, aplicando la traducción de catálogo acordada con I2 |
+
+La lista histórica `eventos` no debe convertirse en órdenes de acción con el instante nuevo de otro fotograma. Conserva los instantes originales y comprueba vigencia, generación y estado del control. Al recibir un resultado inválido, comunica ausencia de mano y libera interacciones activas. La visión no llama a `procesar_reconocimiento`, a ejecutores de Windows ni a sus métodos de clic.
 
 ## Invalidación y eventos
 
-Ante pérdida de mano, lateralidad incierta, cambio brusco de posición, intervalo superior a 200 ms o error, se borran las coordenadas anteriores y termina cualquier gesto activo. Un resultado inválido solo admite eventos `fin`. La aplicación debe liberar cualquier arrastre/trazo activo al recibir un resultado inválido, aunque no exista un evento de inicio previo en ese consumidor.
+Ante pérdida de mano, lateralidad incierta, cambio brusco de posición, intervalo superior a 200 ms o error, se borran las coordenadas anteriores y termina cualquier gesto activo. El procesador emite `fin`; el proveedor añade los eventos históricos que aún no fueron consultados. La aplicación debe liberar cualquier arrastre/trazo activo al recibir un resultado inválido, aunque el consumidor reciba su inicio y fin juntos.
 
 El pellizco usa histéresis: distancia pulgar–índice dividida por ancho de palma; entrada 0,30 y salida 0,45. Al iniciar la captura o recuperar una mano perdida se exige observar primero un pellizco abierto. Una mano cerrada recuperada no inicia por sí sola otra interacción. No existe clic por permanencia del cursor.
 
 Palma y puño producen un solo `inicio` mientras se mantenga esa postura. Las fases de mantenimiento no deben repetir acciones discretas. Un deslizamiento consume la misma postura de palma y no genera después una solicitud de pausa hasta cambiar de postura.
 
-En el modo habitual, el proveedor conserva el resultado estructurado más reciente sin conservar imágenes, y acumula hasta 64 transiciones pendientes. Los eventos `fin` se conservan para que una interfaz más lenta no omita una liberación; los inicios de más de 200 ms se descartan. La pérdida de mano descarta inicios aún no consumidos. Si se desborda la cola, se comunica discontinuidad y se reinicia el reconocimiento. Los resultados caducados nunca entregan posiciones ni inicios válidos.
+El proveedor conserva el resultado estructurado más reciente y una cola en memoria con todas las fases pendientes: inicio, mantenimiento y fin. Las entrega en orden una sola vez al consultar, incluso si entre consultas perdió la mano, hubo un error, se detuvo o se inició otro ciclo. No hay descarte por antigüedad ni límite de 64 eventos. La cola guarda metadatos de gestos; se drena periódicamente y no almacena imágenes ni escribe archivos.
+
+La caducidad de 200 ms invalida la mano, sus coordenadas y desplazamientos. Los eventos anteriores se conservan con sus instantes originales como historial, no como gestos válidos para ejecutar. `es_valido` y el estado reciente se comprueban antes de cualquier acción; la aplicación valida además la edad de cada evento que decida utilizar. Al consumir, el desplazamiento se reinicia para evitar repetir scroll.
 
 `detener(espera_s=2)` tiene espera acotada. Si un controlador nativo queda bloqueado en lectura, devuelve `False` e informa error. No intenta cerrar el mismo recurso simultáneamente desde dos hilos. El hilo conserva la responsabilidad de liberarlo cuando responda el controlador. La aplicación debe mantener detenidas las acciones hasta resolver ese error.
 

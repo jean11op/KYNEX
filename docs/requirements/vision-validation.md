@@ -1,6 +1,6 @@
 # Validación del módulo de visión de Kinex
 
-Verificación inicial: 13 de octubre de 2026. Revisión de deslizamientos: 14 de octubre de 2026. Rama local: `feature/vision-gestures`. La revisión previa a publicación añade el manejo de errores de inicio y la compatibilidad de datos con el dominio en `f5f3e8d`.
+Verificación inicial: 13 de octubre de 2026. Revisión de deslizamientos y del contrato solicitado para integración: 14 de octubre de 2026. Rama: `feature/vision-gestures`.
 
 La entrega se publica como rama de trabajo para integración, con validación real de webcam pendiente. La base es `origin/develop` en `4d4ede9`.
 
@@ -8,26 +8,43 @@ La entrega se publica como rama de trabajo para integración, con validación re
 
 | Comprobación | Resultado observado |
 | --- | --- |
-| Pruebas propias | 72 pruebas aprobadas: 70 unitarias y 2 de integración con el modelo local |
-| Ruff y formato | Sin errores; 23 archivos Python verificados |
+| Pruebas propias | 97 pruebas aprobadas: 95 unitarias y 2 de integración con el modelo local |
+| Ruff y formato | Sin errores; 26 archivos Python verificados |
 | Dependencias | `pip check` sin conflictos; una sola distribución OpenCV |
 | Separación de capas | Importación de contratos, procesador y entrenador sin cargar Qt, NumPy, OpenCV, MediaPipe ni PyAutoGUI |
 | Modelo real | Inferencia local correcta sobre imágenes vacías, sin eventos ni coordenadas de control |
 | Fotografías oficiales de prueba | Índice reconocido y 21 puntos; lateralidad física derecha conservada con y sin espejo |
 | Deslizamientos a cadencia de vídeo | Ambos sentidos reconocidos con puntos simulados a 25, 30 y 60 FPS; no activan después palma quieta ni repiten el inicio |
 | Gestos propios | 20 muestras, validación de consistencia y ambigüedad; reconstrucción desde puntos canónicos y cambio de espejo aprobados |
-| Cierre | Recursos liberados en fallos; lectura bloqueada invalida el control y comunica timeout sin cerrar recursos desde dos hilos |
+| Entrega de eventos | Inicio, mantenimiento y fin en orden, una sola vez; 128 eventos pendientes sin pérdida; historial conservado tras pérdida, error, detención y reinicio |
+| Datos de control | Coordenadas normalizadas, presencia explícita y desplazamiento vertical acumulado entre consultas; pérdida y caducidad invalidan puntos y deltas |
+| Estados | Disponibilidad de cámara independiente de presencia de mano; inicio, pérdida, errores y cierre expuestos por resultados y propiedades del proveedor |
+| Cierre | Recursos liberados en fallos; lectura bloqueada invalida el control y comunica timeout sin cerrar recursos desde dos hilos; error comunicado antes de un cierre nativo bloqueado |
 | Vista previa | Desactivada por defecto, imágenes copiadas, descarte al desactivar o detener |
 | Demo de entrenamiento | Flujo de captura, validación y reconocimiento probado con cámara y puntos simulados |
 | Paquete distribuible | Wheel construido; adaptadores, contratos, modelo y licencia incluidos; SHA-256 del modelo verificado |
-| Compatibilidad Windows y dominio | 94 pruebas aprobadas en una copia temporal con Windows y el dominio publicados: las 72 propias, 20 existentes y 2 de conexión entre visión y ejecutor; conversión de perfil a configuración verificada |
-| Integridad de otras áreas | El ejecutor del integrante 5 conserva el mismo objeto Git; no se modificaron UI, aplicación, dominio, persistencia ni acciones de Windows |
+| Coexistencia con aplicación/dominio | 159 pruebas y 35 subpruebas aprobadas en copia de `c0d8c96`: 97 propias y 62 de aplicación/dominio y contrato Windows de I2 |
+| Coexistencia con Windows | 127 pruebas aprobadas en copia de `81bab63`: 97 propias y 30 existentes; PyAutoGUI simulado |
+| Coexistencia con SQLite | 115 pruebas aprobadas en copia de `ce09895`: 97 propias y 18 existentes |
+| Integridad de otras áreas | Se probaron copias independientes de las ramas publicadas; no se modificaron UI, aplicación, dominio, persistencia ni acciones de Windows |
 
-La comprobación de Windows usa PyAutoGUI simulado. No mueve el mouse ni prueba interacción real con otras aplicaciones. Su archivo conserva el objeto Git `5d595b2515b65825bbb3aeb61fad5adc1242e0dd`.
+Las comprobaciones se ejecutaron en copias temporales separadas, superponiendo únicamente visión y sus pruebas a cada rama. Las cifras incluyen las mismas 97 pruebas propias y no deben sumarse entre sí. La revisión de dominio seleccionó las tres suites `test_member2_application.py`, `test_member2_domain.py` y `test_member2_windows_contract.py`. La comprobación de Windows usa PyAutoGUI simulado; no mueve el mouse ni prueba interacción real con otras aplicaciones. La coexistencia por rama no equivale a una fusión final ni a la conexión completa del flujo de cámara a acciones.
 
 La cobertura automatizada observada en la verificación inicial fue 83 % incluyendo la herramienta de diagnóstico, cuya prueba de flujo se ejecutó aparte. La cobertura no mide precisión de reconocimiento ni rendimiento del equipo.
 
 Las pruebas de índice, pellizco, dos dedos, palma, puño, deslizamientos y posturas propias utilizan puntos de mano simulados. La fotografía oficial verifica el índice con MediaPipe real. Esto comprueba la lógica del reconocedor, pero no acredita que todos los gestos se detecten de forma fiable con una webcam, distintas manos e iluminación.
+
+## Los cinco ajustes solicitados para integración
+
+| Solicitud | Entrega |
+| --- | --- |
+| Mantener `ProveedorVision` responsable de obtener resultados de cámara | Se conserva el protocolo y `obtener_resultado()`; exportación pública en `holocontrol.ports.vision` y adaptación en `AdaptadorVision` |
+| Incluir coordenadas, presencia, desplazamiento vertical y metadatos de gestos | `posicion_indice`, `mano_detectada`, `desplazamiento_vertical` y eventos con nombre, fase, confianza, instante y duración |
+| Entregar eventos acumulados en orden y sin pérdidas entre consultas | Cola FIFO de todas las fases, sin descartes por antigüedad, pérdida de mano o límite de 64; drenado único bajo `Condition` |
+| Exponer disponibilidad de cámara, pérdida, error y detención del trabajador | `EstadoVision`, `estado`, `en_ejecucion`, `camara_disponible`, mensajes y estados `INICIANDO`, `CAMARA_DISPONIBLE`, `DETENIENDO`, `DETENIDO` |
+| Independencia de las acciones del sistema | Sin imports ni llamadas a ejecutores, PyAutoGUI o control de mouse; prueba aislada de límites de importación |
+
+Los eventos acumulados son historial de reconocimiento. Una pérdida, error, caducidad o cierre no recupera coordenadas anteriores ni autoriza esos eventos para ejecutar acciones. El consumidor valida estado, vigencia y generación. La guía de arquitectura distingue `eventos` de `eventos_actuales` y documenta la consulta con un solo coordinador.
 
 ## Revisión de deslizamientos
 
@@ -42,9 +59,9 @@ Estas cadencias son tiempos de fotogramas simulados; no representan FPS medidos 
 | Rama remota | Estado revisado |
 | --- | --- |
 | `develop` | Estructura inicial, `4d4ede9` |
-| `feature/domain-model` | Entidades, validaciones y catálogo de dominio, `f5f3e8d`; todavía no publica contratos de visión ni coordinador de acciones |
-| `feature/sqlite-repository` | Misma base; todavía no contiene persistencia adicional publicada |
-| `feature/windows-actions` | Ejecutor y controlador de clic, `e27abd1` |
+| `feature/domain-model` | Aplicación, entidades, validaciones y catálogo, `c0d8c96`; publica `FuenteReconocimiento` basado en callbacks y DTO `Reconocimiento` |
+| `feature/sqlite-repository` | SQLite, esquema, repositorio de perfiles y pruebas, `ce09895` |
+| `feature/windows-actions` | Ejecutor, controlador de clic y validación de seguridad, `81bab63` |
 | `feature/ui-dashboard` | Prototipo PySide6, `87f9dbe`; preferencias y gestos, sin conexión al motor |
 
 La interfaz utiliza los nombres visibles Índice extendido, Pellizco, Pellizco sostenido, Dos dedos, Mano abierta y Deslizamiento. Corresponden a `indice`, las fases/duración de `pellizco`, `dos_dedos`, `palma_abierta` y los dos deslizamientos. El puño genera la solicitud adicional de cambiar modo aprobada para esta entrega.
@@ -53,11 +70,13 @@ El coordinador debe convertir la mano del perfil (`Derecha`/`Izquierda`) a `Late
 
 ### Compatibilidad con el catálogo de dominio publicado
 
-La revisión posterior de `feature/domain-model` en `f5f3e8d` detectó una diferencia funcional: el catálogo de dominio asigna `dos_dedos` a clic derecho y reserva `subir`/`bajar` para scroll. El catálogo de visión aprobado por el usuario utiliza `dos_dedos` con desplazamiento vertical para scroll. No deben conectarse directamente esas asignaciones predeterminadas sin resolver esta diferencia con el integrante 2.
+La revisión de `feature/domain-model` en `c0d8c96` confirma una diferencia funcional: el catálogo de dominio asigna `dos_dedos` a clic derecho y reserva `subir`/`bajar` para scroll. El catálogo de visión aprobado por el usuario utiliza `dos_dedos` con desplazamiento vertical para scroll. No deben conectarse directamente esas asignaciones predeterminadas sin resolver esta diferencia con el integrante 2.
 
 Visión entrega `palma_abierta`; el catálogo de dominio identifica esa postura como `palma`. El coordinador debe traducir ese identificador. Los gestos de puño, deslizamiento horizontal y cambio de modo aprobados para visión todavía no están registrados en ese catálogo de dominio. Su registro y asignación corresponden al integrante 2; esta entrega no modifica esos archivos.
 
 Para el nuevo `Perfil`, la mano puede convertirse mediante `Lateralidad(perfil.mano_dominante.value)` y la cámara mediante `ConfiguracionCamara(indice=perfil.configuracion.indice_camara)`. Los 400 ms de `tiempo_espera_gesto_ms` pertenecen a la espera entre acciones del perfil; no sustituyen automáticamente los 100 ms de estabilización del reconocedor.
+
+`FuenteReconocimiento` y `Reconocimiento` no contienen el historial de fases ni desplazamiento vertical del contrato de visión. Se mantiene `ProveedorVision` según lo solicitado; la guía incluye la correspondencia de campos para que el coordinador de I1/I5 conecte el contrato de callbacks de I2. La aplicación aplica su propio suavizado: para ese DTO se utilizan los puntos crudos del índice, conservando la posición suavizada de visión para sus demás consumidores.
 
 ## Fusión de configuración compartida
 
@@ -67,7 +86,7 @@ La referencia no se aplica a los archivos ni a la rama de la interfaz. El integr
 
 ## Comprobación pendiente con webcam
 
-La prueba real de cámara 0 terminó con `ErrorCamara` y liberó el dispositivo. No aparecen dispositivos de clase Camera/Image disponibles en este entorno. OpenCV sí incluye los backends DirectShow y Media Foundation de Windows.
+La prueba inicial de cámara 0 terminó con `ErrorCamara` y liberó el dispositivo. Esa comprobación no encontró dispositivos de clase Camera/Image disponibles en el entorno. OpenCV sí incluye los backends DirectShow y Media Foundation de Windows.
 
 La revisión con una webcam conectada debe ejecutar:
 
