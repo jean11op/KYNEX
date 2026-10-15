@@ -123,7 +123,7 @@ def test_composicion_sqlite_dominio_coordinador_y_accion_simulada(tmp_path):
     assert perfil.calibracion is None
     assert {a.id_gesto for a in perfil.asignaciones} >= {
         "indice",
-        "pellizco",
+        "pulgar",
         "dos_dedos",
         "subir",
         "bajar",
@@ -154,7 +154,7 @@ def test_composicion_sqlite_dominio_coordinador_y_accion_simulada(tmp_path):
             instante_ms=ahora_ms,
             estado=EstadoVision.MANO_DETECTADA,
             mano=mano,
-            eventos=(EventoGesto("pellizco", FaseGesto.INICIO, ahora_ms, 0, 1.0),),
+            eventos=(EventoGesto("pulgar", FaseGesto.INICIO, ahora_ms, 0, 1.0),),
         )
     )
     try:
@@ -174,7 +174,7 @@ def test_existing_profiles_receive_new_gestures_without_overwriting_customizatio
     path = tmp_path / 'upgrade.sqlite3'
     core = crear_nucleo(path, ejecutor_existente=Mock(), proveedor_vision=Mock())
     profile = core.repositorio.obtener(core.id_perfil)
-    assignments = tuple(a for a in profile.asignaciones if a.id_gesto not in ('puno', 'tres_dedos'))
+    assignments = tuple(a for a in profile.asignaciones if a.id_gesto not in ('puno', 'tres_dedos', 'menique', 'cuernos', 'deslizamiento_derecha', 'deslizamiento_izquierda'))
     assignments += (AsignacionGesto(profile.id, 'puno', 'clic_derecho'),)
     core.repositorio.actualizar(replace(profile, asignaciones=assignments))
     upgraded = crear_nucleo(path, ejecutor_existente=Mock(), proveedor_vision=Mock())
@@ -182,3 +182,26 @@ def test_existing_profiles_receive_new_gestures_without_overwriting_customizatio
     actual = {a.id_gesto: a.id_accion for a in profile.asignaciones}
     assert actual['puno'] == 'clic_derecho'
     assert actual['tres_dedos'] == 'cambiar_ventana'
+    assert actual['menique'] == 'enter'
+    assert actual['cuernos'] == 'escape'
+    assert actual['deslizamiento_derecha'] == 'volumen_subir'
+    assert actual['deslizamiento_izquierda'] == 'volumen_bajar'
+
+
+@pytest.mark.parametrize('enabled', [True, False])
+def test_old_pinch_click_migrates_once_to_thumb(tmp_path, enabled):
+    from dataclasses import replace
+    from holocontrol.domain.entities import AsignacionGesto
+    path = tmp_path / 'thumb.sqlite3'
+    core = crear_nucleo(path, ejecutor_existente=Mock(), proveedor_vision=Mock())
+    profile = core.repositorio.obtener(core.id_perfil)
+    old = tuple(a for a in profile.asignaciones if a.id_gesto not in ('pulgar', 'pellizco'))
+    old += (AsignacionGesto(profile.id, 'pellizco', 'clic_izquierdo', enabled),)
+    core.repositorio.actualizar(replace(profile, asignaciones=old))
+    for _ in range(2):
+        updated = crear_nucleo(path, ejecutor_existente=Mock(), proveedor_vision=Mock())
+        assignments = updated.repositorio.obtener(profile.id).asignaciones
+        assert next(a for a in assignments if a.id_gesto == 'pellizco').id_accion == 'arrastrar'
+        thumb = [a for a in assignments if a.id_gesto == 'pulgar']
+        assert len(thumb) == 1 and thumb[0].activo == enabled
+        assert thumb[0].id_accion == 'clic_izquierdo'

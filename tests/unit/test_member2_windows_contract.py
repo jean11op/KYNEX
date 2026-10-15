@@ -41,8 +41,8 @@ class PruebasContratoWindowsExistente(unittest.TestCase):
             self.aplicacion.estado_actual().generacion, self.reloj.avanzar(), True, gesto, 0.99, **kwargs))
 
     def test_adaptador_recibe_un_clic_por_gesto_mantenido(self):
-        self.enviar("pellizco")
-        self.enviar("pellizco")
+        self.enviar("pulgar")
+        self.enviar("pulgar")
         self.api.click.assert_called_once_with(button="left", _pause=False)
 
     def test_adaptador_recibe_coordenadas_calibradas(self):
@@ -52,7 +52,7 @@ class PruebasContratoWindowsExistente(unittest.TestCase):
     def test_adaptador_pausa_con_aplicacion(self):
         self.enviar("palma_abierta")
         self.assertEqual(self.aplicacion.estado_actual().estado.name, "PAUSED")
-        self.enviar("pellizco")
+        self.enviar("pulgar")
         self.api.click.assert_not_called()
 
     def test_evento_scroll_llega_a_windows_por_el_adaptador(self):

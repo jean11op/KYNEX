@@ -33,7 +33,7 @@ class BaseDatos:
                 "SELECT sql FROM sqlite_master WHERE name = 'TipoAccion'"
             ).fetchone()
             migracion = ""
-            if tabla and "'minimizar'" not in tabla[0]:
+            if tabla and "'tecla'" not in tabla[0]:
                 # Rebuild the constrained catalog atomically, preserving FK targets.
                 definicion = esquema.split("CREATE TABLE IF NOT EXISTS TipoAccion (")[1].split(";", 1)[0]
                 migracion = (

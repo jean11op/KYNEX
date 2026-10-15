@@ -34,6 +34,7 @@ class ConfiguracionVision:
     umbral_gesto: float = 0.6
     estabilizacion_ms: int = 100
     permanencia_ms: int = 800
+    pausa_palma_ms: int = 7000
     vigencia_ms: int = 200
     factor_suavizado: float = 0.35
     umbral_pellizco_entrada: float = 0.30
@@ -66,6 +67,7 @@ class ConfiguracionVision:
         for nombre in (
             "estabilizacion_ms",
             "permanencia_ms",
+            "pausa_palma_ms",
             "vigencia_ms",
             "ventana_deslizamiento_ms",
         ):

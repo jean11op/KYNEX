@@ -18,6 +18,10 @@ class TipoAccion(str, Enum):
     DESPLAZAR = "desplazar"
     PAUSAR = "pausar"
     MINIMIZAR = "minimizar"
+    TECLA = "tecla"
+    ZOOM = "zoom"
+    DICTAR = "dictar"
+    ARRASTRAR = "arrastrar"
     CAMBIAR_VENTANA = "cambiar_ventana"
 
 

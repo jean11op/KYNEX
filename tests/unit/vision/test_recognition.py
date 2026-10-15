@@ -19,69 +19,46 @@ def test_indice_se_estabiliza_y_no_produce_click_por_permanencia(crear_mano, cre
     assert sum(e.fase is FaseGesto.INICIO for r in resultados for e in r.eventos) == 1
 
 
-def test_pellizco_sostenido_y_fin_inmediato(crear_mano, crear_deteccion):
-    procesador = ProcesadorVision()
-    procesador.interpretar(crear_deteccion(crear_mano(), 0))
-    procesador.interpretar(crear_deteccion(crear_mano("pellizco"), 50))
-    inicio = procesador.interpretar(crear_deteccion(crear_mano("pellizco"), 150))
-    mantenido = procesador.interpretar(crear_deteccion(crear_mano("pellizco"), 180))
-    fin = procesador.interpretar(crear_deteccion(crear_mano(), 200))
-    assert [(e.nombre, e.fase) for e in inicio.eventos] == [("pellizco", FaseGesto.INICIO)]
-    assert mantenido.eventos[0].fase is FaseGesto.MANTENIMIENTO
-    assert mantenido.eventos[0].duracion_ms == 30
-    assert fin.eventos[0].fase is FaseGesto.FIN
+def test_pistola_sostenida_y_fin_inmediato(crear_mano, crear_deteccion):
+    processor = ProcesadorVision()
+    results = [processor.interpretar(crear_deteccion(crear_mano('pistola'), t))
+               for t in (0, 100, 180)]
+    assert not results[0].eventos
+    assert [(e.nombre, e.fase) for e in results[1].eventos] == [('pellizco', FaseGesto.INICIO)]
+    assert results[2].eventos[0].fase is FaseGesto.MANTENIMIENTO
+    released = processor.interpretar(crear_deteccion(crear_mano('indice'), 200))
+    assert released.eventos[0].fase is FaseGesto.FIN
+    assert not any(e.nombre == 'pulgar' for e in released.eventos)
 
 
-def test_no_inicia_pellizco_si_la_captura_empieza_con_mano_cerrada(crear_mano, crear_deteccion):
-    procesador = ProcesadorVision()
-    assert not procesador.interpretar(crear_deteccion(crear_mano("pellizco"), 0)).eventos
-    assert not procesador.interpretar(crear_deteccion(crear_mano("pellizco"), 100)).eventos
+def test_old_pinch_does_not_start_drag(crear_mano, crear_deteccion):
+    processor = ProcesadorVision()
+    for t in range(0, 2000, 100):
+        result = processor.interpretar(crear_deteccion(crear_mano('pellizco'), t))
+        assert all(e.nombre != 'pellizco' for e in result.eventos)
 
 
-def test_histeresis_evitar_fin_por_ruido_en_pellizco(crear_mano, crear_deteccion):
-    procesador = ProcesadorVision()
-    procesador.interpretar(crear_deteccion(crear_mano(), 0))
-    mano = crear_mano("pellizco")
-    procesador.interpretar(crear_deteccion(mano, 50))
-    procesador.interpretar(crear_deteccion(mano, 150))
-    puntos = list(mano.puntos)
-    puntos[4] = replace(puntos[4], x=mano.puntos[8].x + 0.24 * 0.38)
-    ruido = replace(mano, puntos=tuple(puntos))
-    resultado = procesador.interpretar(crear_deteccion(ruido, 180))
-    assert resultado.eventos[0].nombre == "pellizco"
-    assert resultado.eventos[0].fase is FaseGesto.MANTENIMIENTO
-
-
-def test_perdida_termina_pellizco_y_recuperacion_exige_soltar(crear_mano, crear_deteccion):
-    procesador = ProcesadorVision()
-    procesador.interpretar(crear_deteccion(crear_mano(), 0))
-    procesador.interpretar(crear_deteccion(crear_mano("pellizco"), 50))
-    procesador.interpretar(crear_deteccion(crear_mano("pellizco"), 150))
-    perdido = procesador.interpretar(crear_deteccion(instante=180))
-    assert perdido.estado is EstadoVision.MANO_PERDIDA
-    assert perdido.posicion_indice is None and perdido.mano is None
-    assert perdido.eventos[0].fase is FaseGesto.FIN
-    assert not procesador.interpretar(crear_deteccion(crear_mano("pellizco"), 200)).eventos
-    assert not procesador.interpretar(crear_deteccion(crear_mano("pellizco"), 300)).eventos
-    procesador.interpretar(crear_deteccion(crear_mano(), 350))
-    procesador.interpretar(crear_deteccion(crear_mano("pellizco"), 400))
-    assert procesador.interpretar(crear_deteccion(crear_mano("pellizco"), 500)).eventos[0].fase is (
-        FaseGesto.INICIO
-    )
+def test_loss_releases_gun_drag(crear_mano, crear_deteccion):
+    processor = ProcesadorVision()
+    for t in (0, 100, 150):
+        processor.interpretar(crear_deteccion(crear_mano('pistola'), t))
+    lost = processor.interpretar(crear_deteccion(instante=180))
+    assert lost.estado is EstadoVision.MANO_PERDIDA
+    assert [(e.nombre, e.fase) for e in lost.eventos] == [('pellizco', FaseGesto.FIN)]
 
 
 @pytest.mark.parametrize("postura", ["palma_abierta", "puno"])
-def test_gesto_discreto_exige_800ms_quieto_y_no_se_repite(postura, crear_mano, crear_deteccion):
+def test_gesto_discreto_respeta_su_duracion_y_no_se_repite(postura, crear_mano, crear_deteccion):
     procesador = ProcesadorVision()
     resultados = [
         procesador.interpretar(crear_deteccion(crear_mano(postura), instante))
-        for instante in range(0, 1700, 100)
+        for instante in range(0, 7500, 100)
     ]
     inicios = [
         evento for r in resultados for evento in r.eventos if evento.fase is FaseGesto.INICIO
     ]
     assert len(inicios) == 1
-    assert inicios[0].nombre == postura and inicios[0].instante_ms == 800
+    assert inicios[0].nombre == postura and inicios[0].instante_ms == (7000 if postura == "palma_abierta" else 2000)
 
 
 @pytest.mark.parametrize("signo,direccion", [(1, "derecha"), (-1, "izquierda")])
@@ -111,11 +88,11 @@ def test_dos_dedos_informa_desplazamiento_vertical(crear_mano, crear_deteccion):
 @pytest.mark.parametrize(
     "lateralidad,confianza,estado",
     [
-        (Lateralidad.IZQUIERDA, 0.99, EstadoVision.MANO_NO_SELECCIONADA),
+        (Lateralidad.IZQUIERDA, 0.4, EstadoVision.BAJA_CONFIANZA),
         (Lateralidad.DERECHA, 0.4, EstadoVision.BAJA_CONFIANZA),
     ],
 )
-def test_ignora_mano_no_elegida_o_lateralidad_incierta(
+def test_single_hand_does_not_require_certain_handedness(
     lateralidad,
     confianza,
     estado,
@@ -128,8 +105,8 @@ def test_ignora_mano_no_elegida_o_lateralidad_incierta(
             0,
         )
     )
-    assert resultado.estado is estado and not resultado.es_valido
-    assert resultado.posicion_indice is None and not resultado.eventos
+    assert resultado.estado is EstadoVision.MANO_DETECTADA and resultado.es_valido
+    assert resultado.posicion_indice is not None
 
 
 def test_dos_manos_no_cambian_el_control_a_la_no_dominante(crear_mano, crear_deteccion):
@@ -180,7 +157,7 @@ def test_deslizamiento_se_reconoce_a_cadencia_de_video(
 
 
 @pytest.mark.parametrize("postura", ["palma_abierta", "puno"])
-def test_movimiento_reinicia_quietud_sin_adelantar_gesto_discreto(
+def test_movimiento_no_reinicia_la_postura_sostenida(
     postura, crear_mano, crear_deteccion
 ):
     procesador = ProcesadorVision()
@@ -188,7 +165,7 @@ def test_movimiento_reinicia_quietud_sin_adelantar_gesto_discreto(
         procesador.interpretar(
             crear_deteccion(crear_mano(postura, delta_x=min(instante, 800) * 0.0001), instante)
         )
-        for instante in range(0, 1700, 100)
+        for instante in range(0, 7500, 100)
     ]
     inicios = [
         evento
@@ -196,7 +173,7 @@ def test_movimiento_reinicia_quietud_sin_adelantar_gesto_discreto(
         for evento in resultado.eventos
         if evento.fase is FaseGesto.INICIO
     ]
-    assert [(evento.nombre, evento.instante_ms) for evento in inicios] == [(postura, 1600)]
+    assert [(evento.nombre, evento.instante_ms) for evento in inicios] == [(postura, 7000 if postura == "palma_abierta" else 2000)]
 
 
 def test_deslizamiento_demasiado_breve_no_supera_estabilizacion(crear_mano, crear_deteccion):
@@ -228,7 +205,7 @@ def test_fist_with_thumb_touching_index_is_not_pinch(crear_mano, crear_deteccion
     points = list(hand.puntos)
     points[4] = replace(points[4], x=points[8].x, y=points[8].y)
     hand = replace(hand, puntos=tuple(points))
-    results = [processor.interpretar(crear_deteccion(hand, t)) for t in range(0, 1000, 100)]
+    results = [processor.interpretar(crear_deteccion(hand, t)) for t in range(0, 2500, 100)]
     assert any(e.nombre == "puno" and e.fase is FaseGesto.INICIO for r in results for e in r.eventos)
     assert all(e.nombre != "pellizco" for r in results for e in r.eventos)
 

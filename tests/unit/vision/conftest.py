@@ -22,7 +22,10 @@ def crear_mano():
             (0.22, 0.50, 0.0),
         ]
         extendidos = {
+            "menique": (False, False, False, True),
+            "cuernos": (True, False, False, True),
             "indice": (True, False, False, False),
+            "pistola": (True, False, False, False),
             "pellizco": (True, False, False, False),
             "dos_dedos": (True, True, False, False),
             "tres_dedos": (True, True, True, False),
@@ -36,6 +39,9 @@ def crear_mano():
                 if extendido
                 else [(x, y, 0.0) for y in (0.60, 0.47, 0.57, 0.64)]
             )
+        if postura == "pistola":
+            coordenadas[2:5] = [(0.32, 0.66, 0.0), (0.32, 0.46, 0.0), (0.32, 0.26, 0.0)]
+            coordenadas[5:9] = [(0.42, 0.60, 0.0), (0.56, 0.52, 0.0), (0.70, 0.44, 0.0), (0.84, 0.36, 0.0)]
         if postura == "pellizco":
             coordenadas[4] = (0.44, 0.15, 0.0)
         puntos = tuple(

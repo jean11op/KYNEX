@@ -20,11 +20,11 @@ def control():
     app.seleccionar_perfil(profile.id)
     app.calibrar_perfil(Calibracion(profile.id, suavizado=.5))
     state = app.iniciar_control(camara_disponible=True, ancho_pantalla=1920, alto_pantalla=1080)
-    def frame(gesture, phase=FaseGesto.INICIO, x=.5, y=.45, direction=None, confidence=.99):
+    def frame(gesture, phase=FaseGesto.INICIO, x=.5, y=.45, direction=None, confidence=.99, separation=None, palm=None):
         clock.ahora = round(clock() + .05, 3)
         event = EventoGesto(gesture, phase, round(clock() * 1000), 0, confidence)
         return app.procesar_reconocimiento(Reconocimiento(
-            state.generacion, round(clock(), 3), True, x=x, y=y, eventos=(event,), direccion_scroll=direction))
+            state.generacion, round(clock(), 3), True, x=x, y=y, eventos=(event,), direccion_scroll=direction, separacion_dedos=separation, centro_palma=palm))
     return app, executor, frame, clock
 
 
@@ -53,6 +53,19 @@ def test_fist_minimizes_only_once_per_hold(control):
     frame('puno')
     frame('puno', FaseGesto.MANTENIMIENTO)
     executor.minimize_window.assert_called_once()
+
+
+def test_recognized_fist_minimizes_even_immediately_after_click(control):
+    _, executor, frame, _ = control
+    frame('pulgar')
+    frame('pulgar', FaseGesto.FIN)
+    frame('puno', confidence=.65)
+    frame('puno', FaseGesto.MANTENIMIENTO, confidence=.65)
+    executor.left_click.assert_called_once()
+    executor.minimize_window.assert_called_once()
+    frame('puno', FaseGesto.FIN)
+    frame('puno', confidence=.65)
+    assert executor.minimize_window.call_count == 2
 
 
 def test_switch_window_lifecycle(control):
@@ -101,8 +114,10 @@ def test_minimize_targets_foreground_window():
     e.set_hand_detected(True)
     with patch('ctypes.windll.user32') as user32:
         user32.GetForegroundWindow.return_value = 12345
+        user32.GetAncestor.return_value = 67890
         e.minimize_window()
-        user32.ShowWindowAsync.assert_called_once_with(12345, 6)
+        user32.GetAncestor.assert_called_once_with(12345, 3)
+        user32.ShowWindowAsync.assert_called_once_with(67890, 6)
 
 
 def test_alt_released_even_at_failsafe_corner():
@@ -138,3 +153,75 @@ def test_native_windows_receives_full_wheel_notches(amount):
           patch.object(pyautogui.platformModule, '_sendMouseEvent') as send):
         e.scroll(amount)
     assert send.call_args.kwargs['dwData'] == amount * 120
+
+
+def test_thumb_click_does_not_move_or_drag_cursor(control):
+    _, executor, frame, _ = control
+    frame('indice', x=.5, y=.45)
+    executor.reset_mock()
+    frame('pulgar', x=.52, y=.47)
+    frame('pulgar', FaseGesto.FIN, x=.52, y=.47)
+    executor.left_click.assert_called_once()
+    executor.move_cursor.assert_not_called()
+    executor.begin_pinch.assert_not_called()
+    executor.update_pinch.assert_not_called()
+
+
+def test_old_default_pinch_no_longer_clicks(control):
+    _, executor, frame, _ = control
+    frame('pellizco')
+    frame('pellizco', FaseGesto.FIN)
+    executor.left_click.assert_not_called()
+    executor.begin_pinch.assert_not_called()
+
+
+def test_zoom_expands_and_contracts_without_cursor_or_click(control):
+    _, executor, frame, _ = control
+    frame('dos_dedos', separation=.4)
+    frame('dos_dedos', FaseGesto.FIN, separation=.7)
+    executor.reset_mock()
+    frame('zoom', separation=.7)
+    assert executor.zoom.call_args.args[0] > 0
+    frame('zoom', FaseGesto.MANTENIMIENTO, separation=.3)
+    assert executor.zoom.call_args.args[0] < 0
+    executor.move_cursor.assert_not_called()
+    executor.left_click.assert_not_called()
+    frame('zoom', FaseGesto.FIN)
+    executor.reset_mock()
+    frame('zoom', separation=.9)
+    executor.zoom.assert_not_called()
+
+
+def test_like_toggle_once_per_raise(control):
+    _, executor, frame, clock = control
+    frame('like')
+    for _ in range(10):
+        frame('like', FaseGesto.MANTENIMIENTO)
+    executor.toggle_dictation.assert_called_once()
+    frame('like', FaseGesto.FIN)
+    frame('like')
+    assert executor.toggle_dictation.call_count == 2
+
+
+def test_drawing_follows_palm_not_wobbling_index(control):
+    _, executor, frame, _ = control
+    frame('pellizco', palm=(.5,.5))
+    x,y=executor.begin_drag.call_args.args
+    frame('pellizco',FaseGesto.MANTENIMIENTO,x=.7,y=.7,palm=(.5,.5))
+    executor.update_pinch.assert_called_with(x,y)
+    frame('pellizco',FaseGesto.FIN)
+    executor.end_pinch.assert_called_once_with(cancel=False)
+    executor.left_click.assert_not_called()
+
+
+@pytest.mark.parametrize('gesture,key', [('menique','enter'), ('cuernos','esc'),
+    ('deslizamiento_derecha','volumeup'), ('deslizamiento_izquierda','volumedown')])
+def test_keyboard_actions_once_per_gesture(control, gesture, key):
+    _, executor, frame, clock = control
+    frame(gesture)
+    for _ in range(12):
+        frame(gesture, FaseGesto.MANTENIMIENTO)
+    executor.press_key.assert_called_once_with(key)
+    frame(gesture, FaseGesto.FIN)
+    frame(gesture)
+    assert executor.press_key.call_count == 2

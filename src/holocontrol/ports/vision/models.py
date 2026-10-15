@@ -24,7 +24,12 @@ class EstadoVision(StrEnum):
 
 
 class GestoBasico(StrEnum):
+    MENIQUE = "menique"
+    CUERNOS = "cuernos"
     INDICE = "indice"
+    LIKE = "like"
+    ZOOM = "zoom"
+    PULGAR = "pulgar"
     PELLIZCO = "pellizco"
     DOS_DEDOS = "dos_dedos"
     TRES_DEDOS = "tres_dedos"

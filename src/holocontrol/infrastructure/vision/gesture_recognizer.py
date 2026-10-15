@@ -1,8 +1,11 @@
 from collections import deque
 
+from holocontrol.infrastructure.vision.thumb_click import ThumbClick
+
 from holocontrol.infrastructure.vision.configuration import ConfiguracionVision
 from holocontrol.infrastructure.vision.geometry import (
     coordenadas_mano,
+    angulo,
     descriptor_postura,
     distancia,
     normalizar_muestra,
@@ -28,6 +31,10 @@ class ReconocedorGestos:
         self.plantillas = tuple(plantillas)
         if len({plantilla.nombre for plantilla in self.plantillas}) != len(self.plantillas):
             raise ValueError("Las plantillas deben tener nombres distintos.")
+        self._thumb_click = ThumbClick()
+        self._zoom_base = None
+        self._zoom_centro = None
+        self._zoom_activo = False
         self._activo: str | None = None
         self._candidato: str | None = None
         self._inicio_candidato_ms = 0
@@ -37,12 +44,13 @@ class ReconocedorGestos:
         self._ancla: tuple[float, float] | None = None
         self._trayectoria: deque = deque()
         self._discreto_consumido = False
-        self._pellizco_geometrico = False
-        self._requiere_soltar_pellizco = True
         self._ultimo_tres_dedos_ms = -1000
         self._ultimo_cursor_valido_ms = -1000
 
     def reiniciar(self, instante_ms: int) -> tuple[EventoGesto, ...]:
+        self._thumb_click.reset()
+        self._zoom_base = None
+        self._zoom_activo = False
         self._ultimo_tres_dedos_ms = -1000
         self._ultimo_cursor_valido_ms = -1000
         eventos = self._terminar_activo(instante_ms)
@@ -50,9 +58,6 @@ class ReconocedorGestos:
         self._ancla = None
         self._trayectoria.clear()
         self._discreto_consumido = False
-        self._pellizco_geometrico = False
-        # Una mano recuperada ya cerrada no debe iniciar otro clic o arrastre.
-        self._requiere_soltar_pellizco = True
         return eventos
 
     def _terminar_activo(self, instante_ms: int) -> tuple[EventoGesto, ...]:
@@ -81,22 +86,26 @@ class ReconocedorGestos:
         posturas = puntuar_posturas_basicas(puntos)
         nombre, confianza = max(posturas, key=lambda postura: postura[1])
         if nombre is GestoBasico.PUNO and confianza >= self.configuracion.umbral_gesto:
-            self._pellizco_geometrico = False
+            if (puntos[3][1] - puntos[4][1] > ancho_palma * .20
+                    and puntos[2][1] - puntos[4][1] > ancho_palma * .5
+                    and puntos[5][1] - puntos[4][1] > ancho_palma * .6
+                    and puntos[2][1] - puntos[4][1] > abs(puntos[2][0] - puntos[4][0]) * 2.5
+                    and angulo(puntos[2], puntos[3], puntos[4]) > 150):
+                return GestoBasico.LIKE.value, confianza
             return nombre.value, confianza
-        proporcion_pellizco = distancia(puntos[4], puntos[8]) / ancho_palma
-        umbral = (
-            self.configuracion.umbral_pellizco_salida
-            if self._pellizco_geometrico
-            else self.configuracion.umbral_pellizco_entrada
-        )
-        self._pellizco_geometrico = proporcion_pellizco <= umbral
-        if not self._pellizco_geometrico:
-            self._requiere_soltar_pellizco = False
-        elif not self._requiere_soltar_pellizco:
-            confianza = 1 - 0.3 * proporcion_pellizco / self.configuracion.umbral_pellizco_salida
-            return GestoBasico.PELLIZCO.value, confianza
-        else:
-            return None, 0.0
+        if nombre in (GestoBasico.MENIQUE, GestoBasico.CUERNOS) and confianza >= self.configuracion.umbral_gesto:
+            return nombre.value, confianza
+        # Keep the historical ID for saved drag bindings, but recognize a gun
+        # posture instead of thumb/index contact. Angles work with either hand.
+        if nombre is GestoBasico.INDICE and confianza >= self.configuracion.umbral_gesto:
+            thumb = tuple(a-b for a,b in zip(puntos[4], puntos[2]))
+            index = tuple(a-b for a,b in zip(puntos[8], puntos[5]))
+            spread = angulo(thumb, (0, 0, 0), index)
+            if (angulo(puntos[2], puntos[3], puntos[4]) >= 150
+                    and puntos[2][1] - puntos[4][1] >= ancho_palma * .4
+                    and 50 <= spread <= 140
+                    and distancia(puntos[4], puntos[8]) >= ancho_palma * .6):
+                return GestoBasico.PELLIZCO.value, confianza
         if confianza >= self.configuracion.umbral_gesto:
             return nombre.value, confianza
         if self.plantillas:
@@ -126,6 +135,37 @@ class ReconocedorGestos:
         en_espejo: bool = False,
     ) -> tuple[EventoGesto, ...]:
         nombre, confianza = self._clasificar(mano, relacion_aspecto, en_espejo)
+        if nombre == GestoBasico.PELLIZCO.value or self._activo == GestoBasico.PELLIZCO.value:
+            # A held gun must neither freeze drawing nor click when released.
+            self._thumb_click.reset()
+            frozen, clicked = False, False
+        else:
+            frozen, clicked = self._thumb_click.update(mano, instante_ms, relacion_aspecto)
+        if frozen:
+            events = list(self._terminar_activo(instante_ms))
+            self._candidato = None
+            self._ultimo_cursor_valido_ms = -1000
+            if clicked:
+                events.extend(EventoGesto("pulgar", phase, instante_ms, 0, 1.0)
+                              for phase in (FaseGesto.INICIO, FaseGesto.FIN))
+            return tuple(events)
+        if nombre == GestoBasico.DOS_DEDOS.value:
+            puntos = coordenadas_mano(mano, relacion_aspecto)
+            separation = distancia(puntos[8], puntos[12]) / distancia(puntos[5], puntos[17])
+            center = ((mano.puntos[8].x + mano.puntos[12].x)/2,
+                      (mano.puntos[8].y + mano.puntos[12].y)/2)
+            if self._zoom_base is None:
+                self._zoom_base, self._zoom_centro = separation, center
+            elif not self._zoom_activo:
+                if distancia(center, self._zoom_centro) > .05:
+                    self._zoom_base, self._zoom_centro = separation, center
+                elif abs(separation - self._zoom_base) >= .22:
+                    self._zoom_activo = True
+            if self._zoom_activo:
+                nombre = GestoBasico.ZOOM.value
+        else:
+            self._zoom_base = None
+            self._zoom_activo = False
         if self._activo == GestoBasico.TRES_DEDOS.value and nombre is None:
             puntuacion = dict(puntuar_posturas_basicas(coordenadas_mano(mano, relacion_aspecto)))[GestoBasico.TRES_DEDOS]
             if puntuacion >= .35:
@@ -193,12 +233,16 @@ class ReconocedorGestos:
                 self._ancla = centro
                 # Mover la mano reinicia la quietud, pero no la estabilidad de su postura.
                 self._inicio_quieto_ms = instante_ms
-        espera_ms = (
-            self.configuracion.permanencia_ms
-            if permanencia
-            else (self.configuracion.estabilizacion_ms)
-        )
-        inicio_espera_ms = self._inicio_quieto_ms if permanencia else self._inicio_candidato_ms
+        espera_ms = (self.configuracion.pausa_palma_ms if nombre == GestoBasico.PALMA_ABIERTA.value
+                     else 2000 if nombre == GestoBasico.PUNO.value
+                     else 500 if nombre in (GestoBasico.MENIQUE.value, GestoBasico.CUERNOS.value)
+                     else 250 if nombre == GestoBasico.LIKE.value
+                     else self.configuracion.estabilizacion_ms)
+        inicio_espera_ms = self._inicio_candidato_ms
+        if (nombre == GestoBasico.PALMA_ABIERTA.value and self._activo in (
+                GestoBasico.DESLIZAMIENTO_IZQUIERDA.value, GestoBasico.DESLIZAMIENTO_DERECHA.value)
+                and instante_ms - inicio_espera_ms >= espera_ms):
+            eventos.extend(self._terminar_activo(instante_ms))
         if self._activo is None and instante_ms - inicio_espera_ms >= espera_ms:
             self._activar(nombre, confianza, instante_ms)
             if permanencia:

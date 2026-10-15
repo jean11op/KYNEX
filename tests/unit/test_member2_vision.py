@@ -32,7 +32,7 @@ class PruebasIntegracionVision(unittest.TestCase):
         self.app.iniciar_control(camara_disponible=True, ancho_pantalla=101, alto_pantalla=101)
         self.reloj.avanzar(0.1)
 
-    def evento(self, nombre="pellizco", fase=FaseGesto.INICIO, delta_ms=0, confianza=0.99):
+    def evento(self, nombre="pulgar", fase=FaseGesto.INICIO, delta_ms=0, confianza=0.99):
         return EventoGesto(nombre, fase, round(self.reloj() * 1000) + delta_ms, 0, confianza)
 
     def enviar(self, *eventos, **kwargs):
@@ -249,7 +249,7 @@ class PruebasIntegracionVision(unittest.TestCase):
 
     def test_confianza_baja_y_asignacion_inactiva_bloquean_eventos(self):
         self.enviar(self.evento(confianza=0.1))
-        self.app.configurar_gesto(self.perfil.id, "pellizco", "clic_izquierdo", activo=False)
+        self.app.configurar_gesto(self.perfil.id, "pulgar", "clic_izquierdo", activo=False)
         self.app.reanudar_control(camara_disponible=True)
         self.reloj.avanzar(0.01)
         self.assertEqual(self.enviar(self.evento()).motivo, "sin_asignacion_activa")
@@ -257,7 +257,7 @@ class PruebasIntegracionVision(unittest.TestCase):
 
     def test_dto_rechaza_datos_invalidos(self):
         valido = Reconocimiento(1, 100, True)
-        for cambios in ({"eventos": ("pellizco",)}, {"estado_vision": "error"},
+        for cambios in ({"eventos": ("pulgar",)}, {"estado_vision": "error"},
                         {"desplazamiento_vertical": float("nan")},
                         {"desplazamiento_vertical": 1.1}):
             with self.subTest(cambios=cambios), self.assertRaises(ErrorDominio):

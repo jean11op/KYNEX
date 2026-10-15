@@ -22,14 +22,14 @@ class PruebasAplicacion(unittest.TestCase):
         self.aplicacion.calibrar_perfil(Calibracion(self.perfil.id, suavizado=0))
         return self.aplicacion.iniciar_control(camara_disponible=True, ancho_pantalla=101, alto_pantalla=101)
 
-    def fotograma(self, gesto="pellizco", **kwargs):
+    def fotograma(self, gesto="pulgar", **kwargs):
         self.reloj.avanzar()
         return Reconocimiento(**({"generacion": self.aplicacion.estado_actual().generacion,
                               "instante_captura": self.reloj(), "mano_detectada": True,
                               "id_gesto": gesto, "confianza": 0.95} | kwargs))
 
     def test_crear_perfil_incluye_valores_iniciales(self):
-        self.assertEqual(len(self.perfil.asignaciones), 8)
+        self.assertEqual(len(self.perfil.asignaciones), 15)
         self.assertIsNone(self.perfil.calibracion)
 
     def test_nombre_perfil_unico(self):
@@ -105,21 +105,21 @@ class PruebasAplicacion(unittest.TestCase):
 
     def test_predefinidos_protegidos(self):
         with self.assertRaises(ErrorConflicto):
-            self.aplicacion.guardar_gesto(self.perfil.id, "Nuevo", id_gesto="pellizco")
+            self.aplicacion.guardar_gesto(self.perfil.id, "Nuevo", id_gesto="pulgar")
         with self.assertRaises(ErrorConflicto):
-            self.aplicacion.eliminar_gesto(self.perfil.id, "pellizco")
+            self.aplicacion.eliminar_gesto(self.perfil.id, "pulgar")
 
     def test_reemplazar_asignacion_exige_confirmacion(self):
         with self.assertRaises(ErrorConflicto):
-            self.aplicacion.configurar_gesto(self.perfil.id, "pellizco", "clic_derecho")
-        p = self.aplicacion.configurar_gesto(self.perfil.id, "pellizco", "clic_derecho",
+            self.aplicacion.configurar_gesto(self.perfil.id, "pulgar", "clic_derecho")
+        p = self.aplicacion.configurar_gesto(self.perfil.id, "pulgar", "clic_derecho",
                                        reemplazar_existente=True)
-        self.assertEqual(next(a for a in p.asignaciones if a.id_gesto == "pellizco").id_accion,
+        self.assertEqual(next(a for a in p.asignaciones if a.id_gesto == "pulgar").id_accion,
                          "clic_derecho")
 
     def test_rechaza_accion_desconocida(self):
         with self.assertRaises(ErrorDominio):
-            self.aplicacion.configurar_gesto(self.perfil.id, "pellizco", "ejecutar_cmd")
+            self.aplicacion.configurar_gesto(self.perfil.id, "pulgar", "ejecutar_cmd")
 
     def test_eliminar_gesto_propio_elimina_asignacion(self):
         gesto = self.aplicacion.guardar_gesto(self.perfil.id, "Mi gesto")
@@ -130,7 +130,7 @@ class PruebasAplicacion(unittest.TestCase):
         self.assertNotIn(gesto.id, [a.id_gesto for a in p.asignaciones])
 
     def test_restaurar_valores_iniciales(self):
-        self.aplicacion.configurar_gesto(self.perfil.id, "pellizco", "clic_derecho",
+        self.aplicacion.configurar_gesto(self.perfil.id, "pulgar", "clic_derecho",
                                     reemplazar_existente=True)
         with self.assertRaises(ErrorConflicto):
             self.aplicacion.restaurar_asignaciones(self.perfil.id)
@@ -161,7 +161,7 @@ class PruebasAplicacion(unittest.TestCase):
 
     def test_liberar_permite_segundo_clic(self):
         self.iniciar()
-        for gesto in ("pellizco", None, "pellizco"):
+        for gesto in ("pulgar", None, "pulgar"):
             self.aplicacion.procesar_reconocimiento(self.fotograma(gesto))
         self.assertEqual(len(self.ejecutor.llamadas), 2)
 
@@ -238,7 +238,7 @@ class PruebasAplicacion(unittest.TestCase):
         self.assertFalse(self.aplicacion.procesar_reconocimiento(self.fotograma("indice")).ejecutado)
 
     def test_asignacion_desactivada(self):
-        self.aplicacion.configurar_gesto(self.perfil.id, "pellizco", "clic_izquierdo", activo=False)
+        self.aplicacion.configurar_gesto(self.perfil.id, "pulgar", "clic_izquierdo", activo=False)
         self.iniciar()
         self.assertEqual(self.aplicacion.procesar_reconocimiento(self.fotograma()).motivo, "sin_asignacion_activa")
 
@@ -258,7 +258,7 @@ class PruebasAplicacion(unittest.TestCase):
         self.iniciar()
         self.aplicacion.editar_perfil(self.perfil.id, tiempo_espera_gesto_ms=2000)
         self.aplicacion.reanudar_control(camara_disponible=True)
-        self.aplicacion.procesar_reconocimiento(self.fotograma("pellizco"))
+        self.aplicacion.procesar_reconocimiento(self.fotograma("pulgar"))
         resultado = self.aplicacion.procesar_reconocimiento(self.fotograma("subir"))
         self.assertEqual(resultado.motivo, "tiempo_espera")
         self.assertEqual(len(self.ejecutor.llamadas), 1)

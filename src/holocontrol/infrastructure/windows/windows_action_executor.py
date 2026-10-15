@@ -32,6 +32,8 @@ class WindowsActionExecutor(ActionExecutor):
         self._last_click_time = float("-inf")
         self._pinch_started = None
         self._dragging = False
+        self._dictation_requested = False
+        self._drag_position = None
         self._switching = False
         self._switch_anchor = 0.0
 
@@ -51,6 +53,7 @@ class WindowsActionExecutor(ActionExecutor):
         """Pausa temporalmente el control."""
         self.end_window_switch(cancel=True)
         self.end_pinch(cancel=True)
+        self.stop_dictation()
         self._background.release()
         self._state = ControlState.PAUSED
         self._reset_click_gestures()
@@ -59,6 +62,7 @@ class WindowsActionExecutor(ActionExecutor):
         """Detiene el control y elimina la detección de mano."""
         self.end_window_switch(cancel=True)
         self.end_pinch(cancel=True)
+        self.stop_dictation()
         self._background.release()
         self._state = ControlState.STOPPED
         self._hand_detected = False
@@ -109,6 +113,13 @@ class WindowsActionExecutor(ActionExecutor):
             self._pinch_anchor = (x, y)
             self._pointer_anchor = pyautogui.position()
 
+    def begin_drag(self, x: int, y: int) -> None:
+        self.begin_pinch(x, y)
+        if not self._dragging:
+            pyautogui.mouseDown(button='left', _pause=False)
+            self._dragging = True
+            self._drag_position = tuple(self._pointer_anchor)
+
     def update_pinch(self, x: int, y: int) -> None:
         self._ensure_allowed()
         if self._pinch_started is None:
@@ -117,8 +128,19 @@ class WindowsActionExecutor(ActionExecutor):
             pyautogui.mouseDown(button='left', _pause=False)
             self._dragging = True
         if self._dragging:
-            self.move_cursor(self._pointer_anchor[0] + x - self._pinch_anchor[0],
-                             self._pointer_anchor[1] + y - self._pinch_anchor[1])
+            target = (self._pointer_anchor[0] + x - self._pinch_anchor[0],
+                      self._pointer_anchor[1] + y - self._pinch_anchor[1])
+            if self._drag_position is None:
+                self.move_cursor(*target)
+            else:
+                previous = self._drag_position
+                distance = math.dist(previous, target)
+                weight = .5 if distance < 8 else .85
+                current = tuple(a + weight*(b-a) for a,b in zip(previous,target))
+                segments = max(1, min(12, math.ceil(math.dist(previous,current)/5)))
+                for i in range(1, segments+1):
+                    self.move_cursor(*(round(a+(b-a)*i/segments) for a,b in zip(previous,current)))
+                self._drag_position = current
 
     def end_pinch(self, cancel=False) -> None:
         if self._dragging:
@@ -133,6 +155,7 @@ class WindowsActionExecutor(ActionExecutor):
         elif self._pinch_started is not None and not cancel:
             self.left_click()
         self._pinch_started = None
+        self._drag_position = None
 
     def left_click(self) -> None:
         """Ejecuta un clic izquierdo autorizado."""
@@ -173,9 +196,59 @@ class WindowsActionExecutor(ActionExecutor):
         self._ensure_allowed()
 
         if amount != 0:
+            from holocontrol.infrastructure.windows.window_context import (
+                canva_canvas_point, scroll_canva_canvas,
+            )
+            point = canva_canvas_point()
+            if point is not None:
+                self.move_cursor(*point)
+                scroll_canva_canvas(point, amount)
+                return
             # The installed Windows backend passes raw wheel units to mouse_event.
             # WHEEL_DELTA is 120 units per wheel notch.
             pyautogui.scroll(amount * 120, _pause=False)
+
+    def _target_canva_canvas(self) -> None:
+        from holocontrol.infrastructure.windows.window_context import canva_canvas_point
+        point = canva_canvas_point()
+        if point is not None:
+            self.move_cursor(*point)
+
+    def zoom(self, amount: int) -> None:
+        self._ensure_allowed()
+        if not amount:
+            return
+        self._target_canva_canvas()
+        try:
+            pyautogui.keyDown('ctrl', _pause=False)
+            pyautogui.scroll(amount * 120, _pause=False)
+        finally:
+            try:
+                pyautogui.keyUp('ctrl', _pause=False)
+            except pyautogui.FailSafeException:
+                pyautogui.platformModule._keyUp('ctrl')
+
+    def toggle_dictation(self) -> None:
+        self._ensure_allowed()
+        if self._dictation_requested:
+            self.stop_dictation()
+        else:
+            # Windows voice typing writes directly into the focused text field.
+            pyautogui.hotkey('win', 'h', _pause=False)
+            self._dictation_requested = True
+
+    def stop_dictation(self) -> None:
+        if self._dictation_requested:
+            # Focus the voice typing menu before Escape, not the document.
+            pyautogui.hotkey('win', 'alt', 'h', _pause=False)
+            pyautogui.press('esc', _pause=False)
+            self._dictation_requested = False
+
+    def press_key(self, key: str) -> None:
+        self._ensure_allowed()
+        if key not in ('enter', 'esc', 'volumeup', 'volumedown'):
+            raise ValueError("Tecla no admitida.")
+        pyautogui.press(key, _pause=False)
 
     def minimize_window(self) -> None:
         self._ensure_allowed()
@@ -183,10 +256,18 @@ class WindowsActionExecutor(ActionExecutor):
         import ctypes
         user32 = ctypes.windll.user32
         user32.GetForegroundWindow.restype = ctypes.c_void_p
+        user32.GetAncestor.argtypes = [ctypes.c_void_p, ctypes.c_uint]
+        user32.GetAncestor.restype = ctypes.c_void_p
         user32.ShowWindowAsync.argtypes = [ctypes.c_void_p, ctypes.c_int]
+        user32.ShowWindowAsync.restype = ctypes.c_int
         window = user32.GetForegroundWindow()
         if window:
-            user32.ShowWindowAsync(window, 6)
+            # Owned dialogs/popups belong to the application window to minimize.
+            window = user32.GetAncestor(window, 3) or window  # GA_ROOTOWNER
+            if not user32.ShowWindowAsync(window, 6):
+                raise RuntimeError("Windows no pudo minimizar la ventana activa.")
+        else:
+            raise RuntimeError("No hay una ventana activa para minimizar.")
 
     def begin_window_switch(self, x: float) -> None:
         self._ensure_allowed()

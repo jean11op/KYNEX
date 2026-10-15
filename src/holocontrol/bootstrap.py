@@ -13,7 +13,7 @@ import pyautogui
 from time import monotonic, monotonic_ns
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtWidgets import QApplication, QMessageBox, QComboBox, QCheckBox, QSpinBox, QGridLayout
+from PySide6.QtWidgets import QApplication, QMessageBox, QComboBox, QCheckBox, QSpinBox, QGridLayout, QLabel
 
 from holocontrol.application.services.adaptador_ejecutor_existente import (
     AdaptadorEjecutorExistente,
@@ -82,12 +82,22 @@ def crear_nucleo(
 
     # Add new defaults once without replacing explicit user assignments.
     for guardado in repositorio.listar():
-        existentes = {a.id_gesto for a in guardado.asignaciones}
+        # Upgrade the old default click while preserving unrelated custom bindings.
+        asignaciones = guardado.asignaciones
+        if not any(a.id_gesto == 'pulgar' for a in asignaciones):
+            anterior = next((a for a in asignaciones if a.id_gesto == 'pellizco'
+                             and a.id_accion == 'clic_izquierdo'), None)
+            if anterior is not None:
+                asignaciones = tuple(a for a in asignaciones if a is not anterior)
+                asignaciones += (AsignacionGesto(guardado.id, 'pulgar', 'clic_izquierdo', anterior.activo),)
+            else:
+                asignaciones += (AsignacionGesto(guardado.id, 'pulgar', 'clic_izquierdo'),)
+        existentes = {a.id_gesto for a in asignaciones}
         nuevas = tuple(AsignacionGesto(guardado.id, gesto, accion)
-                       for gesto, accion in (("puno", "minimizar"), ("tres_dedos", "cambiar_ventana"))
+                       for gesto, accion in (("menique", "enter"), ("cuernos", "escape"), ("deslizamiento_derecha", "volumen_subir"), ("deslizamiento_izquierda", "volumen_bajar"), ("puno", "minimizar"), ("tres_dedos", "cambiar_ventana"), ("zoom", "zoom"), ("like", "dictar"), ("pellizco", "arrastrar"))
                        if gesto not in existentes)
-        if nuevas:
-            repositorio.actualizar(replace(guardado, asignaciones=guardado.asignaciones + nuevas))
+        if nuevas or asignaciones != guardado.asignaciones:
+            repositorio.actualizar(replace(guardado, asignaciones=asignaciones + nuevas))
     perfiles = aplicacion.listar_perfiles()
     if not perfiles:
         perfil = aplicacion.crear_perfil("Perfil predeterminado", Mano.DERECHA)
@@ -132,7 +142,7 @@ class MainWindow(DashboardWindow):
         self._inicio_vista_previa = 0.0
         self._resultado_visual = None
         self._esquinas = {}
-        self.quick_gesture_names = ['Índice', 'Pellizco', 'Dos dedos', 'Palma', 'Puño', 'Barrido']
+        self.quick_gesture_names = ['Índice', 'Pulgar', 'Dos dedos', 'Palma', 'Puño', 'Tres dedos']
         super().__init__(settings=settings, enable_tray=enable_tray)
         self.setWindowTitle("HoloControl Access")
         self.start_button.setEnabled(True)
@@ -176,6 +186,12 @@ class MainWindow(DashboardWindow):
         if self._futuro is None:
             self._ejecutar_en_trabajador('preparar calibración', self.componentes.coordinador.detener_control)
 
+    def build_settings(self):
+        super().build_settings()
+        for text in self.findChildren(QLabel):
+            if text.text().startswith('Escucha desactivada.'):
+                text.setText('Dictado: haz clic en un campo de texto, muestra un like y espera el aviso de escucha de Windows. Otro like lo detiene. Requiere internet, microfono e idioma de teclado espanol. Las frases personalizadas de esta lista solo se guardan; no activan comandos por voz.')
+
     def build_gestures(self):
         box = self.page('Gestos y acciones de Windows', 'Estas asignaciones pertenecen al perfil de SQLite y son las que usa el control.')
         self.gesture_fields = {}  # The standalone dashboard has a separate preference schema.
@@ -198,14 +214,14 @@ class MainWindow(DashboardWindow):
         box.addLayout(grid)
         box.addWidget(button('Guardar asignaciones', self.save_gestures, 'primary'))
         box.addWidget(button('Restaurar predeterminados', self.restore_gestures))
-        box.addWidget(label('Por defecto: índice → cursor; pellizco → clic izquierdo; dos dedos y movimiento vertical → scroll; palma abierta quieta → pausa. Puño y barridos laterales requieren asignar una acción y activarlos.', 'muted'))
+        box.addWidget(label('Pulgar lateral: clic; pistola (indice extendido y pulgar levantado): mantener clic y dibujar; dos dedos arriba/abajo: scroll; separar/juntar dos dedos: zoom; like: activar/desactivar dictado; palma abierta 7 segundos: pausa; puño cerrado 2 segundos: minimizar una vez. Todos los comandos funcionan con ambas manos.', 'muted'))
         self.threshold = QSpinBox(self)
         self.threshold.hide()
         box.addStretch()
 
     def open_gesture(self, index):
         self.navigate(3)
-        gesto = ("indice", "pellizco", "dos_dedos", "palma_abierta", "puno", "tres_dedos")[index]
+        gesto = ("indice", "pulgar", "dos_dedos", "palma_abierta", "puno", "tres_dedos")[index]
         self.core_gesture_fields[gesto][0].setFocus()
 
     def save_gestures(self):
@@ -248,7 +264,7 @@ class MainWindow(DashboardWindow):
         if (not self._solo_vista_previa or perfil_id != self.componentes.aplicacion.estado_actual().id_perfil_seleccionado
                 or resultado is None or not resultado.es_valido
                 or monotonic_ns() // 1_000_000 - resultado.instante_ms > 200):
-            self.cal_measure_status.setText('No hay una mano válida y reciente. Muestra la mano seleccionada y repite la medición.')
+            self.cal_measure_status.setText('No hay una mano válida y reciente. Muestra una mano y repite la medición.')
             return
         punto = resultado.mano.puntos[8]
         self._esquinas[esquina] = (punto.x, punto.y)

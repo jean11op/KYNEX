@@ -42,7 +42,8 @@ def _mano(postura: str, delta_y: float = 0.0) -> ManoDetectada:
             else [(x, y, 0.0) for y in (0.60, 0.47, 0.57, 0.64)]
         )
     if postura == "pellizco":
-        coordenadas[4] = (0.44, 0.15, 0.0)
+        coordenadas[2:5] = [(0.32, 0.66, 0.0), (0.32, 0.46, 0.0), (0.32, 0.26, 0.0)]
+        coordenadas[5:9] = [(0.42, 0.60, 0.0), (0.56, 0.52, 0.0), (0.70, 0.44, 0.0), (0.84, 0.36, 0.0)]
     coordenadas = [(x, y + delta_y, z) for x, y, z in coordenadas]
     return ManoDetectada(
         tuple(PuntoMano(i, x, y, z) for i, (x, y, z) in enumerate(coordenadas)),
@@ -98,6 +99,10 @@ def test_flujo_vision_dominio_windows_con_dispositivos_simulados(monkeypatch):
     import holocontrol.infrastructure.windows.windows_action_executor as windows_module
 
     clic = []
+    botones = []
+    monkeypatch.setattr(windows_module.pyautogui, "mouseDown", lambda **kw: botones.append("down"))
+    monkeypatch.setattr(windows_module.pyautogui, "mouseUp", lambda **kw: botones.append("up"))
+    monkeypatch.setattr(windows_module.pyautogui, "position", lambda: (320,240))
     movimientos = []
     desplazamientos = []
     monkeypatch.setattr(windows_module.pyautogui, "click", lambda **kw: clic.append(kw))
@@ -124,10 +129,11 @@ def test_flujo_vision_dominio_windows_con_dispositivos_simulados(monkeypatch):
     coordinador.iniciar_control(ancho_pantalla=640, alto_pantalla=480)
     try:
         limite = time.monotonic() + 3
-        while (not clic or not desplazamientos) and time.monotonic() < limite:
+        while (len(botones) < 2 or not desplazamientos) and time.monotonic() < limite:
             coordinador.consultar_vision()
             time.sleep(0.005)
-        assert clic == [{"button": "left", "_pause": False}]
+        assert clic == []
+        assert botones == ["down", "up"]
         assert movimientos
         assert desplazamientos and all(cantidad > 0 for cantidad in desplazamientos)
     finally:

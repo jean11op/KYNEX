@@ -13,7 +13,7 @@ def test_carga_acciones_y_tipos(tmp_path):
         ).fetchone()
 
         cantidad_tipos = resultado[0]
-        assert cantidad_tipos == 7
+        assert cantidad_tipos == 11
 
         # Contamos las acciones.
         resultado = conexion.execute(
@@ -21,7 +21,7 @@ def test_carga_acciones_y_tipos(tmp_path):
         ).fetchone()
 
         cantidad_acciones = resultado[0]
-        assert cantidad_acciones == 9
+        assert cantidad_acciones == 16
 
         # Cada elemento contiene:
         # identificador de acción, tipo y cantidad de desplazamiento.
@@ -60,7 +60,7 @@ def test_carga_gestos_compartidos(tmp_path):
         ).fetchone()
 
         cantidad_gestos = resultado[0]
-        assert cantidad_gestos == 10
+        assert cantidad_gestos == 15
 
         gestos_esperados = [
             "indice",
@@ -87,7 +87,7 @@ def test_carga_gestos_compartidos(tmp_path):
             assert fila["id_perfil"] is None
 
             # Su confianza mínima inicial debe ser 0.8.
-            assert fila["umbral_confianza"] == 0.8
+            assert fila["umbral_confianza"] == (0.6 if identificador in ('puno', 'pellizco') else 0.8)
 
 
 def test_reinicializar_no_duplica_ni_borra_datos(tmp_path):
@@ -121,20 +121,20 @@ def test_reinicializar_no_duplica_ni_borra_datos(tmp_path):
             "SELECT COUNT(*) FROM TipoAccion"
         ).fetchone()
 
-        assert resultado[0] == 7
+        assert resultado[0] == 11
 
         resultado = conexion.execute(
             "SELECT COUNT(*) FROM Accion"
         ).fetchone()
 
-        assert resultado[0] == 9
+        assert resultado[0] == 16
 
         # Debe haber seis gestos compartidos y uno personalizado.
         resultado = conexion.execute(
             "SELECT COUNT(*) FROM Gesto"
         ).fetchone()
 
-        assert resultado[0] == 11
+        assert resultado[0] == 16
 
         # El perfil debe conservarse.
         perfil = conexion.execute(
@@ -162,7 +162,7 @@ def test_migrates_old_action_constraint_without_losing_profile(tmp_path):
     base = BaseDatos(tmp_path / "old.sqlite3")
     folder = Path(module.__file__).parent
     schema = (folder / "esquema.sql").read_text(encoding="utf-8")
-    schema = schema.replace("'pausar', 'minimizar', 'cambiar_ventana'", "'pausar'")
+    schema = schema.replace("'pausar', 'minimizar', 'cambiar_ventana', 'zoom', 'dictar', 'arrastrar', 'tecla'", "'pausar'")
     with base.conectar() as connection:
         connection.executescript(schema)
         connection.execute("INSERT INTO TipoAccion VALUES ('mover_cursor', 'Mover cursor')")
@@ -173,4 +173,20 @@ def test_migrates_old_action_constraint_without_losing_profile(tmp_path):
     with base.transaccion() as connection:
         assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
         assert connection.execute("SELECT nombre FROM Perfil WHERE id_perfil='old'").fetchone()[0] == 'Original'
-        assert connection.execute("SELECT count(*) FROM TipoAccion").fetchone()[0] == 7
+        assert connection.execute("SELECT count(*) FROM TipoAccion").fetchone()[0] == 11
+
+
+def test_migrates_previous_release_keyboard_and_fist_threshold(tmp_path):
+    from pathlib import Path
+    from holocontrol.infrastructure.persistence import conexion as module
+    base = BaseDatos(tmp_path / 'previous.sqlite3')
+    schema = (Path(module.__file__).parent / 'esquema.sql').read_text(encoding='utf-8')
+    with base.conectar() as connection:
+        connection.executescript(schema.replace(", 'tecla'", ""))
+        connection.execute("INSERT INTO Gesto VALUES ('puno', NULL, 'Fist', 0.8)")
+    base.inicializar()
+    base.inicializar()
+    with base.conectar() as connection:
+        assert connection.execute("SELECT umbral_confianza FROM Gesto WHERE id_gesto='puno'").fetchone()[0] == .6
+        assert connection.execute("SELECT count(*) FROM Accion WHERE id_tipo_accion='tecla'").fetchone()[0] == 4
+        assert connection.execute('PRAGMA foreign_key_check').fetchall() == []

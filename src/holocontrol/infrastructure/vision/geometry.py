@@ -67,6 +67,8 @@ def descriptor_postura(mano: ManoDetectada, relacion_aspecto: float) -> tuple[fl
 def puntuar_posturas_basicas(puntos: tuple) -> tuple:
     indice, medio, anular, menique = puntuaciones_dedos(puntos)
     return (
+        (GestoBasico.MENIQUE, min(1 - indice, 1 - medio, 1 - anular, menique)),
+        (GestoBasico.CUERNOS, min(indice, 1 - medio, 1 - anular, menique)),
         (GestoBasico.TRES_DEDOS, min(indice, medio, anular, 1 - menique)),
         (GestoBasico.INDICE, min(indice, 1 - medio, 1 - anular, 1 - menique)),
         (GestoBasico.DOS_DEDOS, min(indice, medio, 1 - anular, 1 - menique)),

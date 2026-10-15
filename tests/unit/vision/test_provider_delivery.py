@@ -234,14 +234,14 @@ def test_procesamiento_conserva_gestos_hasta_perdida_y_recuperacion(
     secuencia = (
         (9_400, "indice"),
         (9_500, "indice"),
-        (9_533, "pellizco"),
-        (9_633, "pellizco"),
-        (9_666, "pellizco"),
+        (9_533, "pistola"),
+        (9_633, "pistola"),
+        (9_666, "pistola"),
         (9_700, None),
         (9_733, "indice"),
         (9_833, "indice"),
-        (9_866, "pellizco"),
-        (9_966, "pellizco"),
+        (9_866, "pistola"),
+        (9_966, "pistola"),
         (10_000, None),
     )
     for instante, postura in secuencia:

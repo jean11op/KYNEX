@@ -50,6 +50,7 @@ class AplicacionControl:
         self._ultima_accion = float('-inf')
         self._gesto_mantenido: str | None = None
         self._gestos_activos: set[str] = set()
+        self._zoom_ancla = None
         self._scroll_ancla = None
         self._scroll_instante = None
         self._ultimo_evento = float('-inf')
@@ -204,6 +205,7 @@ class AplicacionControl:
             return self._guardar_cambios(replace(perfil, asignaciones=asignaciones_predeterminadas(id_perfil)))
 
     def _reiniciar_deteccion(self) -> None:
+        self._zoom_ancla = None
         self._scroll_ancla = None
         self._scroll_instante = None
         self._mano = False
@@ -409,6 +411,7 @@ class AplicacionControl:
                 self._ejecutor.establecer_mano_detectada(mano)
                 self._mano = mano
                 if not mano:
+                    self._zoom_ancla = None
                     self._scroll_ancla = None
                     self._scroll_instante = None
                     self._gesto_mantenido = None
@@ -444,6 +447,8 @@ class AplicacionControl:
                                 self._ejecutor.terminar_pellizco(cancelado=ahora - instante > .25)
                             if nombre in self._gestos_activos and any(a.id_gesto == nombre and a.id_accion == 'cambiar_ventana' and a.activo for a in self._perfil_activo.asignaciones):
                                 self._ejecutor.terminar_cambio_ventana(cancelado=ahora - instante > .25)
+                            if nombre == 'zoom':
+                                self._zoom_ancla = None
                             if nombre == 'dos_dedos':
                                 self._scroll_ancla = None
                                 self._scroll_instante = None
@@ -487,16 +492,38 @@ class AplicacionControl:
         if asignacion is None:
             return ResultadoGesto(False, "sin_asignacion_activa")
         accion = self._acciones[asignacion.id_accion]
-        if (nombre == 'pellizco' and accion.tipo is TipoAccion.CLIC_IZQUIERDO
+        if (nombre == 'pellizco' and accion.tipo in (TipoAccion.CLIC_IZQUIERDO, TipoAccion.ARRASTRAR)
                 and fase is not None and getattr(self._ejecutor, 'admite_arrastre', False)):
             if fotograma.x is None or perfil.calibracion is None:
                 return ResultadoGesto(False, 'sin_coordenadas_o_calibracion', accion.id)
-            x, y = self._posicion_cursor(fotograma, perfil.calibracion)
+            if accion.tipo is TipoAccion.ARRASTRAR and fotograma.centro_palma is not None:
+                # Palm tracking avoids fingertip wobble and cumulative double smoothing.
+                x = round(fotograma.centro_palma[0] * self._pantalla[0] * perfil.calibracion.sensibilidad / .6)
+                y = round(fotograma.centro_palma[1] * self._pantalla[1] * perfil.calibracion.sensibilidad / .6)
+            else:
+                x, y = self._posicion_cursor(fotograma, perfil.calibracion)
             if fase is FaseGesto.INICIO:
-                self._ejecutor.iniciar_pellizco(x, y)
+                if accion.tipo is TipoAccion.ARRASTRAR:
+                    self._ejecutor.iniciar_arrastre(x, y)
+                else:
+                    self._ejecutor.iniciar_pellizco(x, y)
             else:
                 self._ejecutor.actualizar_pellizco(x, y)
             return ResultadoGesto(True, 'pellizco_en_curso', accion.id)
+        if accion.tipo is TipoAccion.ZOOM:
+            if fotograma.separacion_dedos is None:
+                return ResultadoGesto(False, 'sin_separacion', accion.id)
+            if self._zoom_ancla is None:
+                self._zoom_ancla = fotograma.separacion_dedos
+                return ResultadoGesto(False, 'inicio_zoom', accion.id)
+            delta = fotograma.separacion_dedos - self._zoom_ancla
+            steps = int(delta / .15)
+            if not steps:
+                return ResultadoGesto(False, 'zoom_quieto', accion.id)
+            steps = max(-3, min(3, steps))
+            self._ejecutor.ajustar_zoom(steps)
+            self._zoom_ancla += steps * .15
+            return ResultadoGesto(True, 'accion_enviada', accion.id)
         if accion.tipo is TipoAccion.CAMBIAR_VENTANA:
             if fotograma.x is None:
                 return ResultadoGesto(False, 'sin_coordenadas_o_calibracion', accion.id)
@@ -515,20 +542,27 @@ class AplicacionControl:
             elif self._gesto_mantenido == gesto.id:
                 return ResultadoGesto(False, "gesto_mantenido", accion.id)
             if (
-                accion.tipo is not TipoAccion.PAUSAR
+                accion.tipo not in (TipoAccion.PAUSAR, TipoAccion.MINIMIZAR)
                 and instante - self._ultima_accion < perfil.tiempo_espera_gesto_ms / 1000
             ):
                 self._gesto_mantenido = gesto.id
                 return ResultadoGesto(False, "tiempo_espera", accion.id)
         if accion.tipo is TipoAccion.MOVER_CURSOR:
+            if any(e.nombre == nombre and e.fase is FaseGesto.FIN for e in fotograma.eventos):
+                return ResultadoGesto(False, 'cursor_congelado', accion.id)
             if perfil.calibracion is None or fotograma.x is None:
                 return ResultadoGesto(False, "sin_coordenadas_o_calibracion", accion.id)
             self._ejecutor.mover_cursor(*self._posicion_cursor(fotograma, perfil.calibracion))
+        elif accion.tipo is TipoAccion.TECLA:
+            self._ejecutor.pulsar_tecla({"enter": "enter", "escape": "esc",
+                                        "volumen_subir": "volumeup", "volumen_bajar": "volumedown"}[accion.id])
         elif accion.tipo is TipoAccion.CLIC_IZQUIERDO:
             self._ejecutor.clic_izquierdo()
         elif accion.tipo is TipoAccion.CLIC_DERECHO:
             self._ejecutor.clic_derecho()
         elif accion.id == "desplazar_vertical":
+            if fotograma.separacion_dedos is not None:
+                self._zoom_ancla = fotograma.separacion_dedos
             if fotograma.y is not None and fase is not None:
                 if self._scroll_ancla is None:
                     self._scroll_ancla = .45
@@ -556,6 +590,8 @@ class AplicacionControl:
             self._ejecutor.desplazar(cantidad)
         elif accion.tipo is TipoAccion.DESPLAZAR:
             self._ejecutor.desplazar(accion.cantidad)
+        elif accion.tipo is TipoAccion.DICTAR:
+            self._ejecutor.alternar_dictado()
         elif accion.tipo is TipoAccion.MINIMIZAR:
             self._ejecutor.minimizar_ventana()
         elif accion.tipo is TipoAccion.PAUSAR:

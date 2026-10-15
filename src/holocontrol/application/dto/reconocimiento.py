@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from math import dist
 
 from holocontrol.domain.errores import ErrorDominio
 from holocontrol.domain.rules.validacion import validar_entero, validar_numero, validar_texto
@@ -27,6 +28,8 @@ class Reconocimiento:
     eventos: tuple[EventoGesto, ...] = ()
     desplazamiento_vertical: float = 0.0
     direccion_scroll: float | None = None
+    separacion_dedos: float | None = None
+    centro_palma: tuple[float, float] | None = None
     estado_vision: EstadoVision | None = None
     mensaje: str = ""
 
@@ -48,6 +51,14 @@ class Reconocimiento:
             x=punto_indice.x if punto_indice else None,
             y=punto_indice.y if punto_indice else None,
             eventos=resultado.eventos,
+            centro_palma=((resultado.mano.puntos[9].x, resultado.mano.puntos[9].y)
+                          if resultado.es_valido else None),
+            separacion_dedos=(
+                dist((resultado.mano.puntos[8].x, resultado.mano.puntos[8].y),
+                     (resultado.mano.puntos[12].x, resultado.mano.puntos[12].y)) /
+                max(.001, dist((resultado.mano.puntos[5].x, resultado.mano.puntos[5].y),
+                               (resultado.mano.puntos[17].x, resultado.mano.puntos[17].y)))
+                if resultado.es_valido else None),
             direccion_scroll=(
                 max(-1.0, min(1.0, sum(resultado.mano.puntos[base].y - resultado.mano.puntos[tip].y
                                         for base, tip in ((5, 8), (9, 12))) / .2))
@@ -75,6 +86,13 @@ class Reconocimiento:
             1,
         )
 
+        if self.separacion_dedos is not None:
+            validar_numero(self.separacion_dedos, "Separacion", 0, 1500)
+        if self.centro_palma is not None:
+            if len(self.centro_palma) != 2:
+                raise ErrorDominio("Centro de palma invalido.")
+            for coordinate in self.centro_palma:
+                validar_numero(coordinate, "Centro de palma", 0, 1)
         if self.direccion_scroll is not None:
             validar_numero(self.direccion_scroll, "Dirección de scroll", -1, 1)
         validar_entero(self.generacion, "Generación", 0, 2**63 - 1)

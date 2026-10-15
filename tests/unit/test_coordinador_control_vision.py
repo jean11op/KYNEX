@@ -76,7 +76,7 @@ def _resultado_clic(instante_ms):
         Lateralidad.DERECHA,
         0.99,
     )
-    evento = EventoGesto("pellizco", FaseGesto.INICIO, instante_ms, 0, 0.99)
+    evento = EventoGesto("pulgar", FaseGesto.INICIO, instante_ms, 0, 0.99)
     return ResultadoVision(
         instante_ms,
         EstadoVision.MANO_DETECTADA,
