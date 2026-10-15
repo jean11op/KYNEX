@@ -47,6 +47,18 @@ def test_proveedor_expone_estado_inicial_y_detencion_sin_iniciar():
     assert not resultado.mano_detectada and not resultado.camara_disponible
 
 
+def test_snapshot_visual_no_consume_eventos_y_caduca(reloj_vision, crear_mano):
+    proveedor = AdaptadorVision()
+    evento = EventoGesto('pellizco', FaseGesto.INICIO, 10_000, 0, .95)
+    publicar_gesto(proveedor, crear_mano(), evento)
+    assert proveedor.obtener_resultado_visual().eventos == (evento,)
+    assert proveedor.obtener_resultado_visual().eventos == (evento,)
+    assert proveedor.obtener_resultado().eventos == (evento,)
+    assert proveedor.obtener_resultado() is None
+    reloj_vision[0] += 201
+    assert proveedor.obtener_resultado_visual() is None
+
+
 def test_todas_las_fases_se_entregan_una_vez_y_en_orden(reloj_vision, crear_mano):
     proveedor = AdaptadorVision()
     mano = crear_mano()

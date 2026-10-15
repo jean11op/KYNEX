@@ -29,9 +29,26 @@ class BaseDatos:
         conexion = self.conectar()
 
         try:
+            tabla = conexion.execute(
+                "SELECT sql FROM sqlite_master WHERE name = 'TipoAccion'"
+            ).fetchone()
+            migracion = ""
+            if tabla and "'minimizar'" not in tabla[0]:
+                # Rebuild the constrained catalog atomically, preserving FK targets.
+                definicion = esquema.split("CREATE TABLE IF NOT EXISTS TipoAccion (")[1].split(";", 1)[0]
+                migracion = (
+                    "CREATE TABLE TipoAccionNueva (" + definicion + ";\n"
+                    "INSERT INTO TipoAccionNueva SELECT * FROM TipoAccion;\n"
+                    "DROP TABLE TipoAccion;\n"
+                    "ALTER TABLE TipoAccionNueva RENAME TO TipoAccion;\n"
+                )
+            conexion.execute("PRAGMA foreign_keys = OFF")
             conexion.executescript(
-                "BEGIN;\n" + esquema + "\n" + catalogos + "\nCOMMIT;"
+                "BEGIN;\n" + migracion + esquema + "\n" + catalogos
             )
+            if conexion.execute("PRAGMA foreign_key_check").fetchone():
+                raise sqlite3.IntegrityError("Referencias inválidas al migrar los catálogos.")
+            conexion.commit()
         except sqlite3.IntegrityError:
             self._revertir(conexion)
             raise

@@ -84,6 +84,9 @@ class EjecutorRegistro:
     def clic_derecho(self):
         self._registrar("clic_derecho")
 
+    def minimizar_ventana(self):
+        self._registrar("minimizar")
+
     def desplazar(self, cantidad):
         self._registrar("desplazar", cantidad)
 

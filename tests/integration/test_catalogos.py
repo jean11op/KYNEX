@@ -13,7 +13,7 @@ def test_carga_acciones_y_tipos(tmp_path):
         ).fetchone()
 
         cantidad_tipos = resultado[0]
-        assert cantidad_tipos == 5
+        assert cantidad_tipos == 7
 
         # Contamos las acciones.
         resultado = conexion.execute(
@@ -21,7 +21,7 @@ def test_carga_acciones_y_tipos(tmp_path):
         ).fetchone()
 
         cantidad_acciones = resultado[0]
-        assert cantidad_acciones == 7
+        assert cantidad_acciones == 9
 
         # Cada elemento contiene:
         # identificador de acción, tipo y cantidad de desplazamiento.
@@ -60,7 +60,7 @@ def test_carga_gestos_compartidos(tmp_path):
         ).fetchone()
 
         cantidad_gestos = resultado[0]
-        assert cantidad_gestos == 9
+        assert cantidad_gestos == 10
 
         gestos_esperados = [
             "indice",
@@ -121,20 +121,20 @@ def test_reinicializar_no_duplica_ni_borra_datos(tmp_path):
             "SELECT COUNT(*) FROM TipoAccion"
         ).fetchone()
 
-        assert resultado[0] == 5
+        assert resultado[0] == 7
 
         resultado = conexion.execute(
             "SELECT COUNT(*) FROM Accion"
         ).fetchone()
 
-        assert resultado[0] == 7
+        assert resultado[0] == 9
 
         # Debe haber seis gestos compartidos y uno personalizado.
         resultado = conexion.execute(
             "SELECT COUNT(*) FROM Gesto"
         ).fetchone()
 
-        assert resultado[0] == 10
+        assert resultado[0] == 11
 
         # El perfil debe conservarse.
         perfil = conexion.execute(
@@ -154,3 +154,23 @@ def test_reinicializar_no_duplica_ni_borra_datos(tmp_path):
         assert gesto is not None
         assert gesto["nombre"] == "Mi gesto"
         assert gesto["id_perfil"] == "perfil-prueba"
+
+
+def test_migrates_old_action_constraint_without_losing_profile(tmp_path):
+    from pathlib import Path
+    from holocontrol.infrastructure.persistence import conexion as module
+    base = BaseDatos(tmp_path / "old.sqlite3")
+    folder = Path(module.__file__).parent
+    schema = (folder / "esquema.sql").read_text(encoding="utf-8")
+    schema = schema.replace("'pausar', 'minimizar', 'cambiar_ventana'", "'pausar'")
+    with base.conectar() as connection:
+        connection.executescript(schema)
+        connection.execute("INSERT INTO TipoAccion VALUES ('mover_cursor', 'Mover cursor')")
+        connection.execute("INSERT INTO Accion VALUES ('cursor', 'Mover cursor', 'mover_cursor', 0)")
+        connection.execute("INSERT INTO Perfil (id_perfil, nombre) VALUES ('old', 'Original')")
+    base.inicializar()
+    base.inicializar()
+    with base.transaccion() as connection:
+        assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
+        assert connection.execute("SELECT nombre FROM Perfil WHERE id_perfil='old'").fetchone()[0] == 'Original'
+        assert connection.execute("SELECT count(*) FROM TipoAccion").fetchone()[0] == 7

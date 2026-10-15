@@ -39,8 +39,12 @@ class ReconocedorGestos:
         self._discreto_consumido = False
         self._pellizco_geometrico = False
         self._requiere_soltar_pellizco = True
+        self._ultimo_tres_dedos_ms = -1000
+        self._ultimo_cursor_valido_ms = -1000
 
     def reiniciar(self, instante_ms: int) -> tuple[EventoGesto, ...]:
+        self._ultimo_tres_dedos_ms = -1000
+        self._ultimo_cursor_valido_ms = -1000
         eventos = self._terminar_activo(instante_ms)
         self._candidato = None
         self._ancla = None
@@ -74,6 +78,11 @@ class ReconocedorGestos:
         ancho_palma = distancia(puntos[5], puntos[17])
         if ancho_palma < 0.02:
             return None, 0.0
+        posturas = puntuar_posturas_basicas(puntos)
+        nombre, confianza = max(posturas, key=lambda postura: postura[1])
+        if nombre is GestoBasico.PUNO and confianza >= self.configuracion.umbral_gesto:
+            self._pellizco_geometrico = False
+            return nombre.value, confianza
         proporcion_pellizco = distancia(puntos[4], puntos[8]) / ancho_palma
         umbral = (
             self.configuracion.umbral_pellizco_salida
@@ -88,8 +97,6 @@ class ReconocedorGestos:
             return GestoBasico.PELLIZCO.value, confianza
         else:
             return None, 0.0
-        posturas = puntuar_posturas_basicas(puntos)
-        nombre, confianza = max(posturas, key=lambda postura: postura[1])
         if confianza >= self.configuracion.umbral_gesto:
             return nombre.value, confianza
         if self.plantillas:
@@ -119,6 +126,24 @@ class ReconocedorGestos:
         en_espejo: bool = False,
     ) -> tuple[EventoGesto, ...]:
         nombre, confianza = self._clasificar(mano, relacion_aspecto, en_espejo)
+        if self._activo == GestoBasico.TRES_DEDOS.value and nombre is None:
+            puntuacion = dict(puntuar_posturas_basicas(coordenadas_mano(mano, relacion_aspecto)))[GestoBasico.TRES_DEDOS]
+            if puntuacion >= .35:
+                nombre, confianza = GestoBasico.TRES_DEDOS.value, max(.6, puntuacion)
+            elif instante_ms - self._ultimo_tres_dedos_ms <= 180:
+                nombre, confianza = GestoBasico.TRES_DEDOS.value, self._confianza_activa
+        if nombre == GestoBasico.TRES_DEDOS.value:
+            # Only actual posture evidence refreshes the grace interval.
+            puntuacion = dict(puntuar_posturas_basicas(coordenadas_mano(mano, relacion_aspecto)))[GestoBasico.TRES_DEDOS]
+            if puntuacion >= .35:
+                self._ultimo_tres_dedos_ms = instante_ms
+        if nombre == GestoBasico.INDICE.value:
+            self._ultimo_cursor_valido_ms = instante_ms
+        elif (nombre is None and self._activo == GestoBasico.INDICE.value
+              and instante_ms - self._ultimo_cursor_valido_ms <= 80):
+            # Brief posture ambiguity during movement should not restart cursor
+            # stabilization. Lost hands are invalidated by ProcesadorVision.
+            nombre, confianza = GestoBasico.INDICE.value, self._confianza_activa
         centro = (mano.puntos[9].x, mano.puntos[9].y)
         eventos: list[EventoGesto] = []
         if nombre != self._candidato:

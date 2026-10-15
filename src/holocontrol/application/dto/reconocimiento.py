@@ -26,6 +26,7 @@ class Reconocimiento:
 
     eventos: tuple[EventoGesto, ...] = ()
     desplazamiento_vertical: float = 0.0
+    direccion_scroll: float | None = None
     estado_vision: EstadoVision | None = None
     mensaje: str = ""
 
@@ -47,6 +48,11 @@ class Reconocimiento:
             x=punto_indice.x if punto_indice else None,
             y=punto_indice.y if punto_indice else None,
             eventos=resultado.eventos,
+            direccion_scroll=(
+                max(-1.0, min(1.0, sum(resultado.mano.puntos[base].y - resultado.mano.puntos[tip].y
+                                        for base, tip in ((5, 8), (9, 12))) / .2))
+                if resultado.es_valido else None
+            ),
             desplazamiento_vertical=desplazamiento[1] if desplazamiento else 0.0,
             estado_vision=resultado.estado,
             mensaje=resultado.mensaje,
@@ -69,6 +75,8 @@ class Reconocimiento:
             1,
         )
 
+        if self.direccion_scroll is not None:
+            validar_numero(self.direccion_scroll, "Dirección de scroll", -1, 1)
         validar_entero(self.generacion, "Generación", 0, 2**63 - 1)
         validar_numero(self.instante_captura, "Instante", 0, 1e15)
         validar_numero(self.confianza, "Confianza", 0, 1)

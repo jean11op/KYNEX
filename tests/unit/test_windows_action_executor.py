@@ -16,6 +16,30 @@ def create_active_executor():
     return executor
 
 
+def test_real_pyautogui_wrappers_do_not_sleep_after_gesture_actions():
+    import pyautogui as api
+    executor = create_active_executor()
+    with (patch.object(api, 'failSafeCheck') as safety,
+          patch.object(api, '_mouseMoveDrag'),
+          patch.object(api.platformModule, '_click'),
+          patch.object(api.platformModule, '_scroll'),
+          patch.object(api.time, 'sleep') as sleep):
+        executor.move_cursor(300, 300)
+        executor.left_click()
+        executor.scroll(1)
+    assert safety.call_count >= 3
+    assert not any(call.args[0] > 0 for call in sleep.call_args_list)
+    assert api.FAILSAFE is True
+
+
+def test_immediate_actions_still_honor_pyautogui_failsafe():
+    import pyautogui as api
+    executor = create_active_executor()
+    with patch.object(api, 'failSafeCheck', side_effect=api.FailSafeException):
+        with pytest.raises(api.FailSafeException):
+            executor.move_cursor(300, 300)
+
+
 def test_move_cursor_calls_pyautogui():
     executor = create_active_executor()
 
@@ -27,7 +51,7 @@ def test_move_cursor_calls_pyautogui():
     ):
         executor.move_cursor(500, 300)
 
-    move_to.assert_called_once_with(500, 300, duration=0)
+    move_to.assert_called_once_with(500, 300, duration=0, _pause=False)
 
 
 @pytest.mark.parametrize("button,method", [("left", "left_click"), ("right", "right_click")])
@@ -39,7 +63,7 @@ def test_authorized_click_calls_pyautogui(button, method):
     ) as click:
         getattr(executor, method)()
 
-    click.assert_called_once_with(button=button)
+    click.assert_called_once_with(button=button, _pause=False)
 
 
 def test_paused_executor_rejects_actions():
@@ -83,7 +107,7 @@ def test_held_left_click_gesture_clicks_only_once():
         executor.handle_left_click_gesture(True)
         executor.handle_left_click_gesture(True)
 
-    click.assert_called_once_with(button="left")
+    click.assert_called_once_with(button="left", _pause=False)
 
 
 def test_new_left_click_gesture_allows_another_click():
@@ -130,7 +154,7 @@ def test_held_right_click_gesture_clicks_only_once():
         executor.handle_right_click_gesture(True)
         executor.handle_right_click_gesture(True)
 
-    click.assert_called_once_with(button="right")
+    click.assert_called_once_with(button="right", _pause=False)
 
 
 def test_left_and_right_gestures_have_independent_state():
@@ -147,8 +171,8 @@ def test_left_and_right_gestures_have_independent_state():
         executor.handle_right_click_gesture(True)
 
     assert click.call_args_list == [
-        ((), {"button": "left"}),
-        ((), {"button": "right"}),
+        ((), {"button": "left", "_pause": False}),
+        ((), {"button": "right", "_pause": False}),
     ]
 
 
@@ -228,7 +252,7 @@ def test_move_cursor_clamps_coordinates_to_screen():
     ):
         executor.move_cursor(2500, -100)
 
-    move_to.assert_called_once_with(1919, 0, duration=0)
+    move_to.assert_called_once_with(1918, 1, duration=0, _pause=False)
 
 
 def test_scroll_calls_pyautogui():
@@ -239,7 +263,7 @@ def test_scroll_calls_pyautogui():
     ) as scroll:
         executor.scroll(3)
 
-    scroll.assert_called_once_with(3)
+    scroll.assert_called_once_with(360, _pause=False)
 
 
 @pytest.mark.parametrize("amount", [4, -4])
@@ -251,7 +275,7 @@ def test_scroll_passes_positive_and_negative_amounts(amount):
     ) as scroll:
         executor.scroll(amount)
 
-    scroll.assert_called_once_with(amount)
+    scroll.assert_called_once_with(amount * 120, _pause=False)
 
 
 def test_click_cooldown_must_be_finite_and_nonnegative():

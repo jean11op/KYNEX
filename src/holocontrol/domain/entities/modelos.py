@@ -17,6 +17,8 @@ class TipoAccion(str, Enum):
     CLIC_DERECHO = "clic_derecho"
     DESPLAZAR = "desplazar"
     PAUSAR = "pausar"
+    MINIMIZAR = "minimizar"
+    CAMBIAR_VENTANA = "cambiar_ventana"
 
 
 @dataclass(frozen=True)

@@ -89,15 +89,16 @@ class ProcesadorVision:
                 "La palma es demasiado pequeña o inválida.",
             )
         centro = (mano.puntos[9].x, mano.puntos[9].y)
-        if habia_datos and (
-            intervalo_ms > self.configuracion.vigencia_ms
-            or distancia(centro, self._centro_mano) > self.configuracion.salto_maximo_mano
-        ):
+        if habia_datos and intervalo_ms > self.configuracion.vigencia_ms:
             return self.invalidar(
                 instante_ms,
                 EstadoVision.MANO_PERDIDA,
                 "Se interrumpió el seguimiento; vuelve a presentar un gesto neutro.",
             )
+        # A fast, valid hand is not a lost hand. Reset position smoothing on a
+        # large displacement without cancelling the recognized gesture.
+        if habia_datos and distancia(centro, self._centro_mano) > self.configuracion.salto_maximo_mano:
+            self._posicion = None
         posicion_cruda = (mano.puntos[8].x, mano.puntos[8].y)
         desplazamiento = (0.0, 0.0)
         if self._posicion is None:

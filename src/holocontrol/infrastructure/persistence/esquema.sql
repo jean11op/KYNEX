@@ -68,7 +68,7 @@ CREATE TABLE IF NOT EXISTS TipoAccion (
                 'clic_izquierdo',
                 'clic_derecho',
                 'desplazar',
-                'pausar'
+                'pausar', 'minimizar', 'cambiar_ventana'
             )
         ),
     nombre TEXT NOT NULL UNIQUE

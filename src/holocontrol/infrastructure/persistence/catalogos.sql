@@ -4,6 +4,8 @@ VALUES
     ('clic_izquierdo', 'Clic izquierdo'),
     ('clic_derecho', 'Clic derecho'),
     ('desplazar', 'Desplazar'),
+    ('minimizar', 'Minimizar'),
+    ('cambiar_ventana', 'Cambiar ventana'),
     ('pausar', 'Pausar')
 ON CONFLICT(id_tipo_accion) DO NOTHING;
 
@@ -15,6 +17,8 @@ VALUES
     ('desplazar_arriba', 'Desplazar arriba', 'desplazar', 3),
     ('desplazar_abajo', 'Desplazar abajo', 'desplazar', -3),
     ('desplazar_vertical', 'Desplazamiento vertical de la mano', 'desplazar', 1),
+    ('minimizar', 'Minimizar ventana', 'minimizar', 0),
+    ('cambiar_ventana', 'Cambiar ventana (Alt+Tab)', 'cambiar_ventana', 0),
     ('pausar', 'Pausar control', 'pausar', 0)
 ON CONFLICT(id_accion) DO NOTHING;
 
@@ -22,6 +26,7 @@ INSERT INTO Gesto (id_gesto, id_perfil, nombre, umbral_confianza)
 VALUES
     ('indice', NULL, 'Índice extendido', 0.8),
     ('pellizco', NULL, 'Pellizco', 0.8),
+    ('tres_dedos', NULL, 'Tres dedos', 0.8),
     ('dos_dedos', NULL, 'Dos dedos', 0.8),
     ('subir', NULL, 'Deslizar arriba', 0.8),
     ('bajar', NULL, 'Deslizar abajo', 0.8),

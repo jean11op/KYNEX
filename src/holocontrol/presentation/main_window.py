@@ -273,7 +273,7 @@ class MainWindow(QMainWindow):
         quick, qb = panel('Gestos rápidos')
         grid = QGridLayout()
         grid.setSpacing(8)
-        for i, title in enumerate(['Seleccionar', 'Clic', 'Arrastrar', 'Desplazar', 'Pausar', 'Pestañas']):
+        for i, title in enumerate(getattr(self, 'quick_gesture_names', ['Seleccionar', 'Clic', 'Arrastrar', 'Desplazar', 'Pausar', 'Pestañas'])):
             item = button('', lambda checked=False, index=i: self.open_gesture(index), 'gesture')
             tile = QVBoxLayout(item)
             tile.setContentsMargins(5, 10, 5, 8)
@@ -293,6 +293,7 @@ class MainWindow(QMainWindow):
         qb.addLayout(grid)
         bottom.addWidget(quick, 28)
         stats, st = panel('Datos de interacción')
+        self.metric_labels = {}
         tabs = QTabWidget()
         for name, rows in [('Sesión', [('Gestos detectados', '—'), ('Tiempo de sesión', '—'), ('Gestos por minuto', '—')]), ('Gestos', [('Último gesto', 'Sin datos'), ('Confianza', '—'), ('Falsos positivos', '—')]), ('Rendimiento', [('Fotogramas / s', '—'), ('Latencia', '—'), ('Estado', 'Detenido')])]:
             page = QWidget()
@@ -302,7 +303,9 @@ class MainWindow(QMainWindow):
             for title, value in rows:
                 metric_row = QHBoxLayout()
                 metric_row.addWidget(label(title, 'muted'), 1)
-                metric_row.addWidget(label(value, 'metric'))
+                metric = label(value, 'metric')
+                self.metric_labels[title] = metric
+                metric_row.addWidget(metric)
                 column.addLayout(metric_row)
             column.addStretch()
             tabs.addTab(page, name)
@@ -710,10 +713,12 @@ class MainWindow(QMainWindow):
         box.addWidget(behavior)
         camera, cam = panel('Dispositivos')
         selector = QComboBox()
+        self.camera_selector = selector
         selector.addItem('Sin proveedor de cámaras conectado')
         selector.setEnabled(False)
         cam.addWidget(selector)
-        cam.addWidget(label('La lista de cámaras y la vista en directo dependen del módulo de visión artificial.', 'muted'))
+        self.camera_hint = label('La lista de cámaras y la vista en directo dependen del módulo de visión artificial.', 'muted')
+        cam.addWidget(self.camera_hint)
         box.addWidget(camera)
         voice, vb = panel('Voz y dictado')
         form = QFormLayout()

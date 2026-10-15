@@ -72,7 +72,7 @@ class PruebasIntegracionVision(unittest.TestCase):
     def test_eventos_simultaneos_distintos_y_duplicado(self):
         inicio = self.evento()
         resultado = self.enviar(inicio, self.evento("indice"), inicio, x=0.4, y=0.6)
-        self.assertEqual(self.ejecutor.llamadas, [("clic_izquierdo",), ("mover", 40, 60)])
+        self.assertEqual(self.ejecutor.llamadas, [("clic_izquierdo",), ("mover", 33, 75)])
         self.assertEqual(resultado.resultados_eventos[-1].motivo, "evento_duplicado")
         self.reloj.avanzar(0.01)
         self.assertEqual(self.enviar(inicio).motivo, "evento_duplicado")
@@ -196,7 +196,7 @@ class PruebasIntegracionVision(unittest.TestCase):
         self.assertEqual(dato.eventos, vision.eventos)
         self.app.consultar_vision(Mock(obtener_resultado=Mock(return_value=vision)),
                                  generacion=dato.generacion)
-        self.assertEqual(self.ejecutor.llamadas, [("mover", 50, 50)])
+        self.assertEqual(self.ejecutor.llamadas, [("mover", 50, 58)])
 
     def test_coordenada_cruda_y_suavizado_unico_del_dominio(self):
         self.app.calibrar_perfil(Calibracion(self.perfil.id, suavizado=0.5))
@@ -229,10 +229,10 @@ class PruebasIntegracionVision(unittest.TestCase):
         segundo = consultar(1, 0.35, FaseGesto.MANTENIMIENTO)
 
         # La entrada de visión filtrada es 0.35; el DTO entrega el punto crudo (1)
-        # y el dominio aplica una sola vez el peso del perfil: 0 + 0.525 * 1.
+        # y el dominio llega al borde sin que el suavizado impida alcanzarlo.
         self.assertTrue(primero.ejecutado, primero)
         self.assertTrue(segundo.ejecutado, segundo)
-        self.assertEqual(self.ejecutor.llamadas, [("mover", 0, 0), ("mover", 52, 52)])
+        self.assertEqual(self.ejecutor.llamadas, [("mover", 0, 0), ("mover", 100, 100)])
 
     def test_nombre_personalizado_resuelve_asignacion_del_perfil(self):
         gesto = self.app.guardar_gesto(self.perfil.id, "Mi postura")
@@ -245,7 +245,7 @@ class PruebasIntegracionVision(unittest.TestCase):
     def test_catalogo_cubre_vision_y_no_inventa_acciones(self):
         self.assertTrue({g.value for g in GestoBasico} <= {g.id for g in GESTOS})
         self.enviar(self.evento("puno"), self.evento("deslizamiento_izquierda"))
-        self.assertFalse(self.ejecutor.llamadas)
+        self.assertEqual(self.ejecutor.llamadas, [("minimizar",)])
 
     def test_confianza_baja_y_asignacion_inactiva_bloquean_eventos(self):
         self.enviar(self.evento(confianza=0.1))

@@ -1,7 +1,12 @@
 from collections import deque
 from time import monotonic, sleep
+from unittest.mock import Mock
+
+import pytest
 
 from holocontrol.bootstrap import crear_nucleo
+from holocontrol.bootstrap import seleccionar_camara
+from holocontrol.infrastructure.vision.errors import ErrorCamara
 from holocontrol.domain.entities import Calibracion
 from holocontrol.ports.vision.models import (
     EstadoVision,
@@ -12,6 +17,30 @@ from holocontrol.ports.vision.models import (
     PuntoMano,
     ResultadoVision,
 )
+
+
+def test_seleccion_automatica_prueba_otra_camara_y_libera_recursos(monkeypatch):
+    fallida, disponible = Mock(), Mock()
+    fallida.abrir.side_effect = ErrorCamara('No disponible')
+    constructor = Mock(side_effect=[fallida, disponible])
+    monkeypatch.setattr('holocontrol.bootstrap.CamaraOpenCV', constructor)
+    assert seleccionar_camara(0) == 1
+    assert [call.args[0].indice for call in constructor.call_args_list] == [0, 1]
+    fallida.cerrar.assert_called_once()
+    disponible.leer.assert_called_once()
+    disponible.cerrar.assert_called_once()
+
+
+def test_seleccion_manual_no_cambia_a_otro_dispositivo(monkeypatch):
+    camara = Mock()
+    camara.leer.side_effect = ErrorCamara('Sin imagen')
+    constructor = Mock(return_value=camara)
+    monkeypatch.setattr('holocontrol.bootstrap.CamaraOpenCV', constructor)
+    with pytest.raises(ErrorCamara, match='No se encontró'):
+        seleccionar_camara(0, 2)
+    assert constructor.call_count == 1
+    assert constructor.call_args.args[0].indice == 2
+    camara.cerrar.assert_called_once()
 
 
 class EjecutorSimulado:
@@ -137,3 +166,19 @@ def test_composicion_sqlite_dominio_coordinador_y_accion_simulada(tmp_path):
 
     guardado = componentes.repositorio.obtener(perfil.id)
     assert guardado == perfil
+
+
+def test_existing_profiles_receive_new_gestures_without_overwriting_customization(tmp_path):
+    from dataclasses import replace
+    from holocontrol.domain.entities import AsignacionGesto
+    path = tmp_path / 'upgrade.sqlite3'
+    core = crear_nucleo(path, ejecutor_existente=Mock(), proveedor_vision=Mock())
+    profile = core.repositorio.obtener(core.id_perfil)
+    assignments = tuple(a for a in profile.asignaciones if a.id_gesto not in ('puno', 'tres_dedos'))
+    assignments += (AsignacionGesto(profile.id, 'puno', 'clic_derecho'),)
+    core.repositorio.actualizar(replace(profile, asignaciones=assignments))
+    upgraded = crear_nucleo(path, ejecutor_existente=Mock(), proveedor_vision=Mock())
+    profile = upgraded.repositorio.obtener(core.id_perfil)
+    actual = {a.id_gesto: a.id_accion for a in profile.asignaciones}
+    assert actual['puno'] == 'clic_derecho'
+    assert actual['tres_dedos'] == 'cambiar_ventana'

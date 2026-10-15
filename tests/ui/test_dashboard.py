@@ -39,7 +39,7 @@ class DashboardTest(unittest.TestCase):
             item.click()
             self.assertEqual(self.window.stack.currentIndex(), index)
         self.assertFalse(self.window.start_button.isEnabled())
-        self.assertFalse(self.window.preview.image.isNull())
+        self.assertEqual(self.window.preview.accessibleName(), 'C?mara apagada')
         self.window.pause_control()
         self.assertIn('no hay un motor', self.window.feedback.text())
 

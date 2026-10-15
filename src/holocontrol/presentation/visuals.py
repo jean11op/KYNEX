@@ -1,10 +1,9 @@
 """Widgets dibujados por Qt: ilustración, mapa de mano y lienzo manual."""
 
 from itertools import pairwise
-from pathlib import Path
 
 from PySide6.QtCore import Property, QEasingCurve, QPointF, QPropertyAnimation, QRectF, Qt
-from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QWidget
 
 from holocontrol.presentation.motion import motion_enabled
@@ -22,10 +21,23 @@ CHAINS = [(0, 1, 2, 3, 4), (0, 5, 6, 7, 8), (5, 9, 10, 11, 12),
 class HandPreview(QWidget):
     def __init__(self):
         super().__init__()
-        self.image = QPixmap(str(Path(__file__).parent / 'assets' / 'hand-demo.png'))
         self.show_image = True
+        self.live_image = QImage()
+        self.live_mode = False
+        self.landmarks = ()
         self.setMinimumSize(430, 330)
         self.setAccessibleName('Ilustración de una mano. Cámara y reconocimiento no conectados.')
+
+    def set_camera_frame(self, frame, active=True):
+        self.live_mode = active
+        self.live_image = QImage()
+        self.landmarks = ()
+        if frame is not None:
+            image = frame.imagen
+            height, width = image.shape[:2]
+            self.live_image = QImage(image.data, width, height, image.strides[0], QImage.Format.Format_BGR888).copy()
+        self.setAccessibleName('Vista de cámara' if active else 'Cámara detenida')
+        self.update()
 
     def paintEvent(self, event):
         p = QPainter(self)
@@ -35,57 +47,35 @@ class HandPreview(QWidget):
         clip.addRoundedRect(QRectF(self.rect()), 18, 18)
         p.setClipPath(clip)
         p.fillRect(self.rect(), QColor('#11171c'))
-        if self.show_image and not self.image.isNull():
-            scale = max(w / self.image.width(), h / self.image.height())
-            iw, ih = self.image.width() * scale, self.image.height() * scale
-            ox, oy = (w - iw) / 2, (h - ih) / 2
-            p.drawPixmap(QRectF(ox, oy, iw, ih), self.image, QRectF(self.image.rect()))
-            p.fillRect(self.rect(), QColor(0, 5, 9, 60))
-            p.setPen(QPen(QColor(175, 208, 230, 30), 1))
-            for i in range(1, 4):
-                p.drawLine(QPointF(w * i / 4, 0), QPointF(w * i / 4, h))
-                p.drawLine(QPointF(0, h * i / 4), QPointF(w, h * i / 4))
-            coords = [QPointF(ox + x * iw, oy + y * ih) for x, y in POINTS]
-            p.setPen(QPen(QColor(128, 192, 244, 170), 1))
-            for chain in CHAINS:
-                for a, b in pairwise(chain):
-                    p.drawLine(coords[a], coords[b])
-            for point in coords:
-                p.setPen(Qt.PenStyle.NoPen)
-                p.setBrush(QColor(56, 161, 254, 55))
-                p.drawEllipse(point, 7, 7)
-                p.setBrush(QColor('#95d0ff'))
-                p.drawEllipse(point, 2.5, 2.5)
-            bounds = QRectF(ox + .397 * iw, oy + .19 * ih, .32 * iw, .56 * ih)
-            p.setPen(QPen(QColor('#79bfff'), 2))
-            for x, y, dx, dy in [(bounds.left(), bounds.top(), 1, 1), (bounds.right(), bounds.top(), -1, 1), (bounds.left(), bounds.bottom(), 1, -1), (bounds.right(), bounds.bottom(), -1, -1)]:
-                p.drawLine(QPointF(x, y), QPointF(x + dx * 16, y))
-                p.drawLine(QPointF(x, y), QPointF(x, y + dy * 16))
-        else:
-            p.setPen(QColor('#9aabba'))
-            p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, 'Vista previa oculta\nEl control permanece detenido')
-        p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QColor(8, 12, 16, 200))
-        p.drawRoundedRect(QRectF(16, 16, 82, 30), 7, 7)
-        p.drawRoundedRect(QRectF(w - 186, 16, 170, 30), 7, 7)
-        p.drawRoundedRect(QRectF(16, h * .39, 112, 115), 8, 8)
-        p.setPen(QColor('#cdd7de'))
-        p.setFont(QFont('Segoe UI', 9))
-        p.drawText(QRectF(16, 16, 82, 30), Qt.AlignmentFlag.AlignCenter, 'HD  ·  DEMO')
-        p.drawText(QRectF(w - 186, 16, 170, 30), Qt.AlignmentFlag.AlignCenter, '●  IMAGEN ILUSTRATIVA')
-        p.setFont(QFont('Segoe UI', 8))
-        p.drawText(21, 73, '— FPS')
-        p.drawText(21, 92, 'Sin señal de cámara')
-        y = h * .39
-        p.drawText(QRectF(24, y + 13, 100, 20), 'GESTO DE EJEMPLO')
-        p.setPen(QPen(QColor('#dbe7ee'), 1.5))
-        for i in range(4):
-            p.drawLine(QPointF(51 + i * 7, y + 61), QPointF(51 + i * 7, y + 39 - (i % 3) * 3))
-        p.drawArc(QRectF(47, y + 49, 32, 29), 180 * 16, 180 * 16)
-        p.setFont(QFont('Segoe UI', 9))
-        p.drawText(QRectF(24, y + 85, 100, 20), 'Mano abierta')
-        p.setPen(QColor('#c5d2df'))
-        p.drawText(QRectF(18, h - 30, w - 36, 20), 'ILUSTRACIÓN  ·  No hay detección activa')
+        if self.live_mode:
+            if self.show_image and not self.live_image.isNull():
+                scaled = self.live_image.scaled(self.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                p.drawImage((w - scaled.width()) // 2, (h - scaled.height()) // 2, scaled)
+                ox, oy = (w - scaled.width()) // 2, (h - scaled.height()) // 2
+                coords = [QPointF(ox + point.x * scaled.width(), oy + point.y * scaled.height()) for point in self.landmarks]
+                if len(coords) == 21:
+                    p.setPen(QPen(QColor('#56e7a0'), 2))
+                    for chain in CHAINS:
+                        for a, b in pairwise(chain):
+                            p.drawLine(coords[a], coords[b])
+                    p.setBrush(QColor('#91d5ff'))
+                    for point in coords:
+                        p.drawEllipse(point, 3, 3)
+            else:
+                p.setPen(QColor('#c5d2df'))
+                p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, 'Esperando imagen de cámara' if self.show_image else 'Vista previa oculta')
+            return
+        p.translate(w / 2, h / 2 - 12)
+        p.setPen(QPen(QColor('#6d8599'), 3))
+        p.setBrush(QColor('#17222e'))
+        p.drawRoundedRect(QRectF(-42, -25, 84, 55), 10, 10)
+        p.drawRoundedRect(QRectF(-20, -35, 40, 12), 4, 4)
+        p.setBrush(QColor('#11171c'))
+        p.drawEllipse(QPointF(0, 2), 16, 16)
+        p.resetTransform()
+        p.setPen(QColor('#9caebe'))
+        p.setFont(QFont('Segoe UI', 11))
+        p.drawText(QRectF(0, h / 2 + 38, w, 30), Qt.AlignmentFlag.AlignCenter, 'C?mara apagada')
 
 
 class SensitivityDial(QWidget):

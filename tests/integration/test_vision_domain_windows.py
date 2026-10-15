@@ -80,7 +80,7 @@ class _DetectorSimulado:
             postura, delta_y = "pellizco", 0.0
         else:
             postura = "dos_dedos"
-            delta_y = min((self.indice - 11) * 0.035, 0.14)
+            delta_y = max(0, min((self.indice - 16) * 0.035, 0.14))
         return DeteccionManos(
             fotograma.instante_ms,
             (_mano(postura, delta_y),),
@@ -106,7 +106,7 @@ def test_flujo_vision_dominio_windows_con_dispositivos_simulados(monkeypatch):
         "moveTo",
         lambda x, y, **kw: movimientos.append((x, y, kw)),
     )
-    monkeypatch.setattr(windows_module.pyautogui, "scroll", desplazamientos.append)
+    monkeypatch.setattr(windows_module.pyautogui, "scroll", lambda amount, **kw: desplazamientos.append(amount))
     monkeypatch.setattr(windows_module.pyautogui, "size", lambda: (640, 480))
     ejecucion = WindowsActionExecutor(click_cooldown=0)
     aplicacion = AplicacionControl(
@@ -127,8 +127,8 @@ def test_flujo_vision_dominio_windows_con_dispositivos_simulados(monkeypatch):
         while (not clic or not desplazamientos) and time.monotonic() < limite:
             coordinador.consultar_vision()
             time.sleep(0.005)
-        assert clic == [{"button": "left"}]
+        assert clic == [{"button": "left", "_pause": False}]
         assert movimientos
-        assert desplazamientos and all(cantidad < 0 for cantidad in desplazamientos)
+        assert desplazamientos and all(cantidad > 0 for cantidad in desplazamientos)
     finally:
         coordinador.detener_control()

@@ -209,3 +209,51 @@ def test_deslizamiento_demasiado_breve_no_supera_estabilizacion(crear_mano, crea
     ]
     resultados.append(procesador.interpretar(crear_deteccion(crear_mano(), 100)))
     assert all(not resultado.eventos for resultado in resultados)
+
+
+def test_three_fingers_start_move_and_lower(crear_mano, crear_deteccion):
+    processor = ProcesadorVision()
+    processor.interpretar(crear_deteccion(crear_mano("tres_dedos"), 0))
+    started = processor.interpretar(crear_deteccion(crear_mano("tres_dedos"), 100))
+    assert [(e.nombre, e.fase) for e in started.eventos] == [("tres_dedos", FaseGesto.INICIO)]
+    moved = processor.interpretar(crear_deteccion(crear_mano("tres_dedos", delta_x=.1), 150))
+    assert moved.eventos[0].fase is FaseGesto.MANTENIMIENTO
+    ended = processor.interpretar(crear_deteccion(crear_mano("puno"), 200))
+    assert ended.eventos[0].fase is FaseGesto.FIN
+
+
+def test_fist_with_thumb_touching_index_is_not_pinch(crear_mano, crear_deteccion):
+    processor = ProcesadorVision()
+    hand = crear_mano("puno")
+    points = list(hand.puntos)
+    points[4] = replace(points[4], x=points[8].x, y=points[8].y)
+    hand = replace(hand, puntos=tuple(points))
+    results = [processor.interpretar(crear_deteccion(hand, t)) for t in range(0, 1000, 100)]
+    assert any(e.nombre == "puno" and e.fase is FaseGesto.INICIO for r in results for e in r.eventos)
+    assert all(e.nombre != "pellizco" for r in results for e in r.eventos)
+
+
+def test_three_fingers_survive_motion_and_brief_uncertainty(crear_mano, crear_deteccion, monkeypatch):
+    processor = ProcesadorVision()
+    hand = crear_mano("tres_dedos")
+    processor.interpretar(crear_deteccion(hand, 0))
+    processor.interpretar(crear_deteccion(hand, 100))
+    # A marginal classification while moving must not release Alt.
+    monkeypatch.setattr(processor._reconocedor, '_clasificar', lambda *args: (None, 0))
+    for t in (140, 180, 220, 260, 300):
+        result = processor.interpretar(crear_deteccion(crear_mano("tres_dedos", delta_x=.1), t))
+        assert [(e.nombre, e.fase) for e in result.eventos] == [("tres_dedos", FaseGesto.MANTENIMIENTO)]
+
+
+@pytest.mark.parametrize('up', [True, False])
+def test_scroll_direction_comes_from_two_fingers_orientation(crear_mano, crear_deteccion, up):
+    from holocontrol.application.dto.reconocimiento import Reconocimiento
+    hand = crear_mano('dos_dedos')
+    if not up:
+        hand = replace(hand, puntos=tuple(replace(p, y=1 - p.y) for p in hand.puntos))
+    processor = ProcesadorVision()
+    processor.interpretar(crear_deteccion(hand, 0))
+    result = processor.interpretar(crear_deteccion(hand, 100))
+    assert result.eventos[0].nombre == 'dos_dedos'
+    dto = Reconocimiento.desde_vision(result, 1)
+    assert dto.direccion_scroll == (1 if up else -1)

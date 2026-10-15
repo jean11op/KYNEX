@@ -50,6 +50,8 @@ class AplicacionControl:
         self._ultima_accion = float('-inf')
         self._gesto_mantenido: str | None = None
         self._gestos_activos: set[str] = set()
+        self._scroll_ancla = None
+        self._scroll_instante = None
         self._ultimo_evento = float('-inf')
         self._eventos_del_instante: set[tuple[str, FaseGesto]] = set()
         self._inicio_sesion = float('-inf')
@@ -202,6 +204,8 @@ class AplicacionControl:
             return self._guardar_cambios(replace(perfil, asignaciones=asignaciones_predeterminadas(id_perfil)))
 
     def _reiniciar_deteccion(self) -> None:
+        self._scroll_ancla = None
+        self._scroll_instante = None
         self._mano = False
         self._perfil_activo = None
         self._gesto_mantenido = None
@@ -320,12 +324,15 @@ class AplicacionControl:
             raise ErrorDominio("El gesto de cursor necesita ambas coordenadas.")
         x = (fotograma.x - calibracion.x_min) / (calibracion.x_max - calibracion.x_min)
         y = (fotograma.y - calibracion.y_min) / (calibracion.y_max - calibracion.y_min)
+        # Use the inner 60% of the calibrated area so the whole hand stays visible.
+        x = (x - .2) / .6
+        y = (y - .15) / .6
         x = max(0, min(1, (x - 0.5) * calibracion.sensibilidad + 0.5))
         y = max(0, min(1, (y - 0.5) * calibracion.sensibilidad + 0.5))
         if self._posicion is not None:
             peso = 1 - 0.95 * calibracion.suavizado
-            x = self._posicion[0] + peso * (x - self._posicion[0])
-            y = self._posicion[1] + peso * (y - self._posicion[1])
+            x = x if x in (0, 1) else self._posicion[0] + peso * (x - self._posicion[0])
+            y = y if y in (0, 1) else self._posicion[1] + peso * (y - self._posicion[1])
         self._posicion = (x, y)
         return round(x * (self._pantalla[0] - 1)), round(y * (self._pantalla[1] - 1))
 
@@ -402,6 +409,8 @@ class AplicacionControl:
                 self._ejecutor.establecer_mano_detectada(mano)
                 self._mano = mano
                 if not mano:
+                    self._scroll_ancla = None
+                    self._scroll_instante = None
                     self._gesto_mantenido = None
                     self._gestos_activos.clear()
                     self._resto_scroll = 0.0
@@ -431,6 +440,13 @@ class AplicacionControl:
                         self._eventos_del_instante.add(clave)
                         nombre = self._resolver_nombre_vision(evento.nombre)
                         if evento.fase is FaseGesto.FIN:
+                            if nombre == 'pellizco' and getattr(self._ejecutor, 'admite_arrastre', False):
+                                self._ejecutor.terminar_pellizco(cancelado=ahora - instante > .25)
+                            if nombre in self._gestos_activos and any(a.id_gesto == nombre and a.id_accion == 'cambiar_ventana' and a.activo for a in self._perfil_activo.asignaciones):
+                                self._ejecutor.terminar_cambio_ventana(cancelado=ahora - instante > .25)
+                            if nombre == 'dos_dedos':
+                                self._scroll_ancla = None
+                                self._scroll_instante = None
                             self._gestos_activos.discard(nombre)
                             self._resto_scroll = 0.0
                             resultados.append(ResultadoGesto(False, "fin_gesto"))
@@ -471,6 +487,25 @@ class AplicacionControl:
         if asignacion is None:
             return ResultadoGesto(False, "sin_asignacion_activa")
         accion = self._acciones[asignacion.id_accion]
+        if (nombre == 'pellizco' and accion.tipo is TipoAccion.CLIC_IZQUIERDO
+                and fase is not None and getattr(self._ejecutor, 'admite_arrastre', False)):
+            if fotograma.x is None or perfil.calibracion is None:
+                return ResultadoGesto(False, 'sin_coordenadas_o_calibracion', accion.id)
+            x, y = self._posicion_cursor(fotograma, perfil.calibracion)
+            if fase is FaseGesto.INICIO:
+                self._ejecutor.iniciar_pellizco(x, y)
+            else:
+                self._ejecutor.actualizar_pellizco(x, y)
+            return ResultadoGesto(True, 'pellizco_en_curso', accion.id)
+        if accion.tipo is TipoAccion.CAMBIAR_VENTANA:
+            if fotograma.x is None:
+                return ResultadoGesto(False, 'sin_coordenadas_o_calibracion', accion.id)
+            if nombre not in self._gestos_activos:
+                self._ejecutor.iniciar_cambio_ventana(fotograma.x)
+                self._gestos_activos.add(nombre)
+            else:
+                self._ejecutor.actualizar_cambio_ventana(fotograma.x)
+            return ResultadoGesto(True, 'accion_enviada', accion.id)
         continuo = accion.tipo is TipoAccion.MOVER_CURSOR or accion.id == "desplazar_vertical"
         if not continuo:
             if fase is not None:
@@ -494,8 +529,26 @@ class AplicacionControl:
         elif accion.tipo is TipoAccion.CLIC_DERECHO:
             self._ejecutor.clic_derecho()
         elif accion.id == "desplazar_vertical":
-            # y crece hacia abajo; Windows usa cantidades negativas para bajar.
-            self._resto_scroll -= fotograma.desplazamiento_vertical * 30
+            if fotograma.y is not None and fase is not None:
+                if self._scroll_ancla is None:
+                    self._scroll_ancla = .45
+                    self._scroll_instante = instante - .05
+                dt = max(0, min(.1, instante - self._scroll_instante))
+                self._scroll_instante = instante
+                calibracion = perfil.calibracion
+                y = (fotograma.y - calibracion.y_min) / (calibracion.y_max - calibracion.y_min)
+                distancia = y - self._scroll_ancla
+                # Fixed neutral zone: raising two fingers already high scrolls immediately.
+                exceso = max(0, abs(distancia) - .06)
+                velocidad = min(24, exceso * 120)
+                if fotograma.direccion_scroll is not None:
+                    direccion = fotograma.direccion_scroll
+                    velocidad_firmada = 18 * direccion if abs(direccion) >= .25 else 0
+                else:
+                    velocidad_firmada = (-1 if distancia > 0 else 1) * velocidad
+                self._resto_scroll += velocidad_firmada * dt
+            else:
+                self._resto_scroll -= fotograma.desplazamiento_vertical * 30
             cantidad = int(self._resto_scroll)
             self._resto_scroll -= cantidad
             if not cantidad:
@@ -503,6 +556,8 @@ class AplicacionControl:
             self._ejecutor.desplazar(cantidad)
         elif accion.tipo is TipoAccion.DESPLAZAR:
             self._ejecutor.desplazar(accion.cantidad)
+        elif accion.tipo is TipoAccion.MINIMIZAR:
+            self._ejecutor.minimizar_ventana()
         elif accion.tipo is TipoAccion.PAUSAR:
             self.pausar_control()
         if self._estado is EstadoControl.ACTIVE:

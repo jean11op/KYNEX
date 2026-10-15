@@ -29,7 +29,7 @@ class PruebasAplicacion(unittest.TestCase):
                               "id_gesto": gesto, "confianza": 0.95} | kwargs))
 
     def test_crear_perfil_incluye_valores_iniciales(self):
-        self.assertEqual(len(self.perfil.asignaciones), 6)
+        self.assertEqual(len(self.perfil.asignaciones), 8)
         self.assertIsNone(self.perfil.calibracion)
 
     def test_nombre_perfil_unico(self):
@@ -231,7 +231,7 @@ class PruebasAplicacion(unittest.TestCase):
         self.aplicacion.reanudar_control(camara_disponible=True)
         self.aplicacion.procesar_reconocimiento(self.fotograma("indice", x=0, y=0))
         self.aplicacion.procesar_reconocimiento(self.fotograma("indice", x=1, y=1))
-        self.assertEqual(self.ejecutor.llamadas, [("mover", 0, 0), ("mover", 5, 5)])
+        self.assertEqual(self.ejecutor.llamadas, [("mover", 0, 0), ("mover", 100, 100)])
 
     def test_rechaza_coordenadas_ausentes(self):
         self.iniciar()
@@ -248,7 +248,7 @@ class PruebasAplicacion(unittest.TestCase):
         self.assertEqual(self.aplicacion.estado_actual().estado, EstadoControl.PAUSED)
 
     def test_desplazamiento_y_clic_derecho(self):
-        self.aplicacion.configurar_gesto(self.perfil.id, "puno", "clic_derecho")
+        self.aplicacion.configurar_gesto(self.perfil.id, "puno", "clic_derecho", reemplazar_existente=True)
         self.iniciar()
         self.aplicacion.procesar_reconocimiento(self.fotograma("puno"))
         self.aplicacion.procesar_reconocimiento(self.fotograma("subir"))

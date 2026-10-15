@@ -27,6 +27,7 @@ class GestoBasico(StrEnum):
     INDICE = "indice"
     PELLIZCO = "pellizco"
     DOS_DEDOS = "dos_dedos"
+    TRES_DEDOS = "tres_dedos"
     PALMA_ABIERTA = "palma_abierta"
     PUNO = "puno"
     DESLIZAMIENTO_IZQUIERDA = "deslizamiento_izquierda"

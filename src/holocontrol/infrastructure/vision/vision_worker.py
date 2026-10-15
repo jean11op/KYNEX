@@ -115,6 +115,15 @@ class AdaptadorVision:
                 return None
             return Fotograma(fotograma.imagen.copy(), fotograma.instante_ms, fotograma.en_espejo)
 
+    def obtener_resultado_visual(self) -> ResultadoVision | None:
+        """Read a recent immutable snapshot without consuming action events."""
+        with self._condicion:
+            if self._parada.is_set() or self._ultimo is None:
+                return None
+            if monotonic_ns() // 1_000_000 - self._ultimo.instante_ms > self.configuracion.vigencia_ms:
+                return None
+            return self._ultimo
+
     def _publicar(self, resultado: ResultadoVision) -> None:
         with self._condicion:
             if self._parada.is_set() and resultado.estado not in (

@@ -43,11 +43,11 @@ class PruebasContratoWindowsExistente(unittest.TestCase):
     def test_adaptador_recibe_un_clic_por_gesto_mantenido(self):
         self.enviar("pellizco")
         self.enviar("pellizco")
-        self.api.click.assert_called_once_with(button="left")
+        self.api.click.assert_called_once_with(button="left", _pause=False)
 
     def test_adaptador_recibe_coordenadas_calibradas(self):
         self.enviar("indice", x=1, y=0)
-        self.api.moveTo.assert_called_once_with(1919, 0, duration=0)
+        self.api.moveTo.assert_called_once_with(1918, 1, duration=0, _pause=False)
 
     def test_adaptador_pausa_con_aplicacion(self):
         self.enviar("palma_abierta")
@@ -63,5 +63,5 @@ class PruebasContratoWindowsExistente(unittest.TestCase):
                                  round(instante * 1000), 100, 0.99),),
             desplazamiento_vertical=0.1,
         ))
-        self.api.scroll.assert_called_once_with(-3)
+        self.api.scroll.assert_called_once_with(-360, _pause=False)
         self.api.click.assert_not_called()

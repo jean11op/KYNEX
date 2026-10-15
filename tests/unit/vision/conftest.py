@@ -25,6 +25,7 @@ def crear_mano():
             "indice": (True, False, False, False),
             "pellizco": (True, False, False, False),
             "dos_dedos": (True, True, False, False),
+            "tres_dedos": (True, True, True, False),
             "palma_abierta": (True, True, True, True),
             "puno": (False, False, False, False),
             "personalizado": (False, True, False, False),
