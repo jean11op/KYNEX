@@ -1,0 +1,7 @@
+# Versiones verificadas con Python 3.13.15 en Windows x64.
+mediapipe==1.1.0
+opencv-contrib-python==5.0.0.93
+numpy==2.5.4
+pytest==9.1.1
+pytest-cov==7.1.0
+ruff==0.17.0
