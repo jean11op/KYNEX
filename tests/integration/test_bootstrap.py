@@ -2,6 +2,7 @@ from collections import deque
 from time import monotonic, sleep
 
 from holocontrol.bootstrap import crear_nucleo
+from holocontrol.domain.entities import Calibracion
 from holocontrol.ports.vision.models import (
     EstadoVision,
     EventoGesto,
@@ -90,7 +91,7 @@ def test_composicion_sqlite_dominio_coordinador_y_accion_simulada(tmp_path):
 
     perfil = componentes.repositorio.obtener(componentes.id_perfil)
     assert perfil is not None
-    assert perfil.calibracion is not None
+    assert perfil.calibracion is None
     assert {a.id_gesto for a in perfil.asignaciones} >= {
         "indice",
         "pellizco",
@@ -100,6 +101,8 @@ def test_composicion_sqlite_dominio_coordinador_y_accion_simulada(tmp_path):
         "palma_abierta",
     }
     assert componentes.aplicacion.estado_actual().id_perfil_seleccionado == perfil.id
+    componentes.aplicacion.calibrar_perfil(Calibracion(perfil.id))
+    perfil = componentes.repositorio.obtener(perfil.id)
 
     componentes_lectura = crear_nucleo(
         tmp_path / "holocontrol.sqlite3",

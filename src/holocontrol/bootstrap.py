@@ -4,26 +4,19 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Callable
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
-from functools import partial
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QThread, QTimer, Signal, Slot
-from PySide6.QtWidgets import (
-    QApplication,
-    QLabel,
-    QMainWindow,
-    QPushButton,
-    QVBoxLayout,
-    QWidget,
-)
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtWidgets import QApplication
 
 from holocontrol.application.services.adaptador_ejecutor_existente import (
     AdaptadorEjecutorExistente,
 )
 from holocontrol.application.services.coordinador_control_vision import CoordinadorControlVision
 from holocontrol.application.use_cases import AplicacionControl
-from holocontrol.domain.entities import Calibracion, Mano
+from holocontrol.domain.entities import Mano
 from holocontrol.domain.value_objects.estado_control import EstadoControl
 from holocontrol.infrastructure.persistence.conexion import BaseDatos
 from holocontrol.infrastructure.persistence.repositorio_perfil import RepositorioPerfilesSQLite
@@ -35,6 +28,7 @@ from holocontrol.infrastructure.vision.vision_worker import AdaptadorVision
 from holocontrol.infrastructure.windows.windows_action_executor import WindowsActionExecutor
 from holocontrol.ports.vision.models import Lateralidad
 from holocontrol.ports.vision.vision_provider import ProveedorVision
+from holocontrol.presentation.main_window import MainWindow as DashboardWindow
 
 
 @dataclass(frozen=True)
@@ -65,8 +59,6 @@ def crear_nucleo(
     perfiles = aplicacion.listar_perfiles()
     if not perfiles:
         perfil = aplicacion.crear_perfil("Perfil predeterminado", Mano.DERECHA)
-        aplicacion.calibrar_perfil(Calibracion(id_perfil=perfil.id))
-        perfil = repositorio.obtener(perfil.id)
     else:
         perfil = perfiles[0]
     aplicacion.seleccionar_perfil(perfil.id)
@@ -81,201 +73,310 @@ def crear_nucleo(
     return ComponentesNucleo(base, repositorio, aplicacion, proveedor, coordinador, perfil.id)
 
 
-class _TrabajoCicloVida(QObject):
-    terminado = Signal(str, object, object)
+class MainWindow(DashboardWindow):
+    """Conecta el dashboard existente con SQLite, el coordinador y la cámara."""
 
-    def __init__(self, operacion: str, ejecutar: Callable[[], object]) -> None:
-        super().__init__()
-        self._operacion = operacion
-        self._ejecutar = ejecutar
-
-    @Slot()
-    def run(self) -> None:
-        try:
-            self.terminado.emit(self._operacion, self._ejecutar(), None)
-        except Exception as error:  # noqa: BLE001 - El fallo se comunica a la ventana.
-            self.terminado.emit(self._operacion, None, error)
-
-
-class MainWindow(QMainWindow):
-    def __init__(self, componentes: ComponentesNucleo | None = None):
-        super().__init__()
-        ruta_bd = Path.home() / ".holocontrol" / "holocontrol.sqlite3"
-        self.componentes = componentes or crear_nucleo(ruta_bd)
-        self.setWindowTitle("HoloControl Access")
-        self.resize(800, 500)
-
-        self.title_label = QLabel("HoloControl Access")
-        self.title_label.setStyleSheet("font-size: 28px; font-weight: bold;")
-        self.description_label = QLabel(
-            "Control accesible de Windows mediante gestos de las manos."
+    def __init__(
+        self,
+        componentes: ComponentesNucleo | None = None,
+        *,
+        settings=None,
+        enable_tray: bool = True,
+    ):
+        self.componentes = componentes or crear_nucleo(
+            Path.home() / ".holocontrol" / "holocontrol.sqlite3"
         )
-        self.status_label = QLabel("Estado: preparado; cámara detenida")
-        self.start_button = QPushButton("Iniciar / reanudar control")
-        self.pause_button = QPushButton("Pausar control")
-        self.stop_button = QPushButton("Detener control")
-        self.start_button.clicked.connect(self.start_control)
-        self.pause_button.clicked.connect(self.pause_control)
-        self.stop_button.clicked.connect(self.stop_control)
-
-        layout = QVBoxLayout()
-        for widget in (
-            self.title_label,
-            self.description_label,
-            self.status_label,
-            self.start_button,
-            self.pause_button,
-            self.stop_button,
-        ):
-            layout.addWidget(widget)
-        layout.addStretch()
-        central_widget = QWidget()
-        central_widget.setLayout(layout)
-        self.setCentralWidget(central_widget)
-
-        self._trabajo: QThread | None = None
-        self._trabajador: _TrabajoCicloVida | None = None
+        self._ejecutor_ciclo = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="holocontrol-ui"
+        )
+        self._futuro: Future | None = None
         self._operacion_actual: str | None = None
-        self._cerrar_pendiente = False
-        self._cerrando = False
+        self._cierre_pendiente = False
         self._cerrado = False
-        self._cierre_correcto = False
+        super().__init__(settings=settings, enable_tray=enable_tray)
+        self.setWindowTitle("HoloControl Access")
+        self.start_button.setEnabled(True)
+        self.start_button.setToolTip("Inicia después de que la cámara esté disponible.")
+        self.start_button.clicked.connect(self.start_control)
         self._sondeo = QTimer(self)
         self._sondeo.setInterval(20)
         self._sondeo.timeout.connect(self._consultar_vision)
+        self._sondeo_trabajo = QTimer(self)
+        self._sondeo_trabajo.setInterval(20)
+        self._sondeo_trabajo.timeout.connect(self._revisar_trabajo)
+        self._actualizar_estado()
 
-    def _ejecutar_en_trabajador(self, operacion: str, ejecutar: Callable[[], object]) -> None:
-        if self._trabajo is not None:
+    def refresh(self):
+        super().refresh()
+        if not hasattr(self, "profile_list") or not hasattr(self, "componentes"):
             return
-        self._habilitar_controles(False)
-        thread = QThread(self)
-        worker = _TrabajoCicloVida(operacion, ejecutar)
-        worker.moveToThread(thread)
-        thread.started.connect(worker.run)
-        worker.terminado.connect(self._ciclo_terminado)
-        worker.terminado.connect(thread.quit)
-        thread.finished.connect(worker.deleteLater)
-        thread.finished.connect(lambda: self._limpiar_trabajador(thread))
-        self._trabajo, self._trabajador = thread, worker
-        self._operacion_actual = operacion
-        thread.start()
-
-    @Slot()
-    def start_control(self) -> None:
-        estado = self.componentes.aplicacion.estado_actual().estado
-        if estado is EstadoControl.ACTIVE:
-            return
-        if estado is EstadoControl.PAUSED:
-            iniciar = self.componentes.coordinador.reanudar_control
-        else:
-            pantalla = QApplication.primaryScreen()
-            if pantalla is None:
-                self.status_label.setText("Estado: no se detectó una pantalla")
-                return
-            tamano = pantalla.size()
-            ancho, alto = tamano.width(), tamano.height()
-            iniciar = partial(
-                self.componentes.coordinador.iniciar_control,
-                ancho_pantalla=ancho,
-                alto_pantalla=alto,
+        estado = self.componentes.aplicacion.estado_actual()
+        perfiles = self.componentes.aplicacion.listar_perfiles()
+        self.profile_list.blockSignals(True)
+        self.profile_list.clear()
+        for perfil in perfiles:
+            calibracion = "calibrado" if perfil.calibracion is not None else "calibración pendiente"
+            self.profile_list.addItem(
+                f"{perfil.nombre} · Mano {perfil.mano_dominante.value} · {calibracion}"
             )
-        self.status_label.setText("Estado: esperando a que la cámara esté lista…")
-        self._ejecutar_en_trabajador("iniciar", iniciar)
+            item = self.profile_list.item(self.profile_list.count() - 1)
+            item.setData(Qt.ItemDataRole.UserRole, perfil.id)
+            if perfil.id == estado.id_perfil_seleccionado:
+                self.profile_list.setCurrentItem(item)
+        seleccionado = next(
+            (perfil for perfil in perfiles if perfil.id == estado.id_perfil_seleccionado),
+            None,
+        )
+        if seleccionado is not None:
+            self.profile_badge.setText(seleccionado.nombre)
+            self.header_profile.setText(seleccionado.nombre)
+        self.profile_list.blockSignals(False)
 
-    @Slot()
-    def pause_control(self) -> None:
-        self._sondeo.stop()
-        self.status_label.setText("Estado: pausando y cerrando la cámara…")
-        self._ejecutar_en_trabajador("pausar", self.componentes.coordinador.pausar_control)
-
-    @Slot()
-    def stop_control(self) -> None:
-        self._sondeo.stop()
-        self.status_label.setText("Estado: deteniendo y cerrando la cámara…")
-        self._ejecutar_en_trabajador("detener", self.componentes.coordinador.detener_control)
-
-    @Slot()
-    def _consultar_vision(self) -> None:
-        try:
-            resultado = self.componentes.coordinador.consultar_vision()
-            estado = self.componentes.aplicacion.estado_actual()
-            if estado.estado is not EstadoControl.ACTIVE:
-                self._sondeo.stop()
-                self.status_label.setText(
-                    f"Estado: control pausado ({resultado.motivo})"
-                )
-        except Exception as error:  # noqa: BLE001 - Un fallo invalida el sondeo gestual.
-            self._sondeo.stop()
-            self.status_label.setText(f"Estado: control detenido por error ({error})")
-
-    @Slot(str, object, object)
-    def _ciclo_terminado(self, operacion: str, resultado: object, error: object) -> None:
-        if error is not None:
-            self.status_label.setText(f"Estado: {operacion} falló ({error})")
-        elif operacion == "iniciar" and not self._cerrar_pendiente:
-            self.status_label.setText("Estado: control activo")
-            self._sondeo.start()
-        elif operacion == "pausar":
-            self.status_label.setText("Estado: control pausado")
-        elif operacion in ("detener", "cerrar"):
-            self.status_label.setText("Estado: control detenido")
-
-        if self._cerrar_pendiente and operacion in ("detener", "cerrar"):
-            if error is None:
-                self._cierre_correcto = True
-            else:
-                self._cerrar_pendiente = False
-                self._cerrando = False
-                self._cierre_correcto = False
-                self._habilitar_controles(True)
-        elif not self._cerrar_pendiente:
-            self._habilitar_controles(True)
-
-    def _limpiar_trabajador(self, thread: QThread) -> None:
-        if self._trabajo is thread:
-            self._trabajo = None
-            self._trabajador = None
-            operacion, self._operacion_actual = self._operacion_actual, None
-            if self._cerrar_pendiente and operacion in ("detener", "cerrar"):
-                if self._cierre_correcto:
-                    self._cerrado = True
-                    self.close()
-            elif self._cerrar_pendiente:
-                self._cerrando = False
-                self._detener_para_cerrar()
-        thread.deleteLater()
-
-    def _detener_para_cerrar(self) -> None:
-        if self._cerrando:
-            return
-        self._cerrando = True
-        self._sondeo.stop()
-        self._ejecutar_en_trabajador(
-            "cerrar", self.componentes.coordinador.detener_control
+    def selected_profile(self):
+        item = self.profile_list.currentItem()
+        if item is None:
+            return None
+        return next(
+            (
+                perfil
+                for perfil in self.componentes.aplicacion.listar_perfiles()
+                if perfil.id == item.data(Qt.ItemDataRole.UserRole)
+            ),
+            None,
         )
 
-    def _habilitar_controles(self, habilitados: bool) -> None:
+    def create_profile(self):
+        result = self.profile_dialog()
+        if result is None:
+            return
+        nombre, mano = result
+
+        def crear():
+            self.componentes.coordinador.detener_control()
+            perfil = self.componentes.aplicacion.crear_perfil(nombre, Mano(mano.lower()))
+            return self.componentes.aplicacion.seleccionar_perfil(perfil.id)
+
+        self._ejecutar_en_trabajador("crear perfil", crear)
+
+    def select_profile(self):
+        perfil = self.selected_profile()
+        if perfil is None:
+            return
+        if self.componentes.aplicacion.estado_actual().id_perfil_seleccionado == perfil.id:
+            return
+
+        def seleccionar():
+            self.componentes.coordinador.detener_control()
+            return self.componentes.aplicacion.seleccionar_perfil(perfil.id)
+
+        self._ejecutar_en_trabajador("seleccionar perfil", seleccionar)
+
+    def edit_profile(self):
+        perfil = self.selected_profile()
+        if perfil is None:
+            return
+        resultado = self.profile_dialog(
+            {
+                "id": perfil.id,
+                "name": perfil.nombre,
+                "hand": perfil.mano_dominante.value.title(),
+            }
+        )
+        if resultado is None:
+            return
+        nombre, mano = resultado
+
+        def editar():
+            self.componentes.coordinador.detener_control()
+            return self.componentes.aplicacion.editar_perfil(
+                perfil.id, nombre=nombre, mano_dominante=Mano(mano.lower())
+            )
+
+        self._ejecutar_en_trabajador("editar perfil", editar)
+
+    def delete_profile(self):
+        perfil = self.selected_profile()
+        if perfil is None:
+            return
+        if len(self.componentes.aplicacion.listar_perfiles()) < 2:
+            self.feedback.setText("Debe conservarse al menos un perfil.")
+            return
+        if not self.confirm("Eliminar perfil", f"¿Eliminar «{perfil.nombre}» y sus datos?"):
+            return
+
+        def eliminar():
+            self.componentes.coordinador.detener_control()
+            self.componentes.aplicacion.eliminar_perfil(perfil.id, confirmado=True)
+
+        self._ejecutar_en_trabajador("eliminar perfil", eliminar)
+
+    def start_control(self):
+        estado = self.componentes.aplicacion.estado_actual()
+        perfil = next(
+            (
+                perfil
+                for perfil in self.componentes.aplicacion.listar_perfiles()
+                if perfil.id == estado.id_perfil_seleccionado
+            ),
+            None,
+        )
+        if perfil is None:
+            self.feedback.setText("Selecciona un perfil antes de iniciar.")
+            return
+        if perfil.calibracion is None:
+            self.feedback.setText("El perfil necesita una calibración real antes de iniciar.")
+            return
+        if estado.estado is EstadoControl.ACTIVE:
+            return
+        pantalla = QApplication.primaryScreen()
+        if pantalla is None:
+            self.feedback.setText("No se detectó una pantalla.")
+            return
+        tamano = pantalla.size()
+
+        def iniciar():
+            proveedor = self.componentes.proveedor_vision
+            if isinstance(proveedor, AdaptadorVision):
+                proveedor.configuracion = ConfiguracionVision(
+                    mano_dominante=Lateralidad(perfil.mano_dominante.value)
+                )
+                proveedor.camara = ConfiguracionCamara(
+                    indice=perfil.configuracion.indice_camara
+                )
+            if estado.estado is EstadoControl.PAUSED:
+                return self.componentes.coordinador.reanudar_control()
+            return self.componentes.coordinador.iniciar_control(
+                ancho_pantalla=tamano.width(), alto_pantalla=tamano.height()
+            )
+
+        self.feedback.setText("Esperando a que la cámara esté disponible…")
+        self._ejecutar_en_trabajador("iniciar", iniciar)
+
+    def pause_control(self):
+        self._sondeo.stop()
+        self.feedback.setText("Pausando el control y cerrando la cámara…")
+        self._ejecutar_en_trabajador(
+            "pausar", self.componentes.coordinador.pausar_control
+        )
+
+    def stop_control(self):
+        self._sondeo.stop()
+        self.feedback.setText("Deteniendo el control y cerrando la cámara…")
+        self._ejecutar_en_trabajador(
+            "detener", self.componentes.coordinador.detener_control
+        )
+
+    def _ejecutar_en_trabajador(self, operacion: str, ejecutar: Callable[[], object]):
+        if self._futuro is not None:
+            return
+        self._habilitar_controles(False)
+        self._operacion_actual = operacion
+        self._futuro = self._ejecutor_ciclo.submit(ejecutar)
+        self._sondeo_trabajo.start()
+
+    def _revisar_trabajo(self):
+        futuro = self._futuro
+        if futuro is None or not futuro.done():
+            return
+        self._sondeo_trabajo.stop()
+        operacion, self._operacion_actual = self._operacion_actual, None
+        self._futuro = None
+        try:
+            resultado, error = futuro.result(), None
+        except Exception as fallo:  # noqa: BLE001 - se muestra el error de infraestructura.
+            resultado, error = None, fallo
+        self._ciclo_terminado(operacion or "operaci?n", resultado, error)
+
+    def _consultar_vision(self):
+        try:
+            self.componentes.coordinador.consultar_vision()
+        except Exception as error:  # noqa: BLE001 - muestra el fallo y detiene el sondeo.
+            self.feedback.setText(f"Control detenido por error: {error}")
+            self._sondeo.stop()
+        self._actualizar_estado()
+
+    def _actualizar_estado(self):
+        estado = self.componentes.aplicacion.estado_actual()
+        self.camera_status_label.setText(
+            "Disponible" if estado.camara_disponible else "No conectada"
+        )
+        if estado.mano_detectada:
+            self.recognition_status_label.setText("Mano detectada")
+        elif estado.camara_disponible and estado.estado is EstadoControl.ACTIVE:
+            self.recognition_status_label.setText("Esperando la mano")
+        else:
+            self.recognition_status_label.setText("Detenido")
+        etiqueta = {
+            EstadoControl.ACTIVE: "●  Control activo",
+            EstadoControl.PAUSED: "●  Control pausado",
+            EstadoControl.STOPPED: "●  Control detenido",
+        }[estado.estado]
+        self.control_status_label.setText(etiqueta)
+        if estado.error:
+            self.feedback.setText(estado.error)
+        if estado.estado is not EstadoControl.ACTIVE and hasattr(self, "_sondeo"):
+            self._sondeo.stop()
+
+    def _ciclo_terminado(self, operacion: str, resultado: object, error: object):
+        if error is not None:
+            self.feedback.setText(f"{operacion.capitalize()} fall?: {error}")
+            if operacion == "cerrar":
+                self._cierre_pendiente = False
+        elif operacion == "iniciar":
+            self.feedback.setText(
+                "Control activo. Las acciones se habilitaron despu?s de iniciar la c?mara."
+            )
+            self._sondeo.start()
+        elif operacion == "pausar":
+            self.feedback.setText("Control pausado.")
+        elif operacion == "detener":
+            self.feedback.setText("Control detenido.")
+        elif operacion == "cerrar":
+            self._cerrado = True
+        elif operacion in (
+            "crear perfil",
+            "seleccionar perfil",
+            "editar perfil",
+            "eliminar perfil",
+        ):
+            self.feedback.setText("Perfil actualizado en SQLite.")
+            self.refresh()
+        self._actualizar_estado()
+        self._habilitar_controles(error is None or operacion == "cerrar")
+        if self._cierre_pendiente:
+            if operacion == "cerrar" and self._cerrado:
+                self._cierre_pendiente = False
+                QTimer.singleShot(0, self.close)
+            elif operacion != "cerrar":
+                QTimer.singleShot(
+                    0,
+                    lambda: self._ejecutar_en_trabajador(
+                        "cerrar", self.componentes.coordinador.detener_control
+                    ),
+                )
+
+    def _habilitar_controles(self, habilitados: bool):
         for boton in (self.start_button, self.pause_button, self.stop_button):
             boton.setEnabled(habilitados)
 
-    def closeEvent(self, event) -> None:
+    def closeEvent(self, event):
         if self._cerrado:
-            event.accept()
+            self._ejecutor_ciclo.shutdown(wait=False)
+            super().closeEvent(event)
             return
-        self._cerrar_pendiente = True
         event.ignore()
-        if self._trabajo is None:
-            estado = self.componentes.aplicacion.estado_actual().estado
-            if estado is EstadoControl.STOPPED:
-                self._cerrado = True
-                self.close()
-            else:
-                self._detener_para_cerrar()
+        self._cierre_pendiente = True
+        self._sondeo.stop()
+        if self._futuro is None:
+            self._ejecutar_en_trabajador(
+                "cerrar", self.componentes.coordinador.detener_control
+            )
 
 
 def main() -> None:
     app = QApplication(sys.argv)
-    window = MainWindow()
+    componentes = crear_nucleo(Path.home() / ".holocontrol" / "holocontrol.sqlite3")
+    window = MainWindow(componentes)
     window.show()
     sys.exit(app.exec())
 
