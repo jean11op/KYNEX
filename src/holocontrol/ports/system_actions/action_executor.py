@@ -21,6 +21,6 @@ class ActionExecutor(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def scroll(self, amount: int) -> None:
+    def scroll(self, amount: float) -> None:
         """Desplaza el contenido de la ventana activa."""
         raise NotImplementedError

@@ -97,6 +97,7 @@ class _DetectorSimulado:
 
 def test_flujo_vision_dominio_windows_con_dispositivos_simulados(monkeypatch):
     import holocontrol.infrastructure.windows.windows_action_executor as windows_module
+    import holocontrol.infrastructure.windows.window_context as window_context
 
     clic = []
     botones = []
@@ -111,7 +112,8 @@ def test_flujo_vision_dominio_windows_con_dispositivos_simulados(monkeypatch):
         "moveTo",
         lambda x, y, **kw: movimientos.append((x, y, kw)),
     )
-    monkeypatch.setattr(windows_module.pyautogui, "scroll", lambda amount, **kw: desplazamientos.append(amount))
+    monkeypatch.setattr(window_context, 'canva_canvas_point', lambda: None)
+    monkeypatch.setattr(windows_module.pyautogui, 'scroll', lambda amount, **kw: desplazamientos.append(amount))
     monkeypatch.setattr(windows_module.pyautogui, "size", lambda: (640, 480))
     ejecucion = WindowsActionExecutor(click_cooldown=0)
     aplicacion = AplicacionControl(

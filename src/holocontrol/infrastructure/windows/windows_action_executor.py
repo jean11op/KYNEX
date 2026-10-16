@@ -205,21 +205,14 @@ class WindowsActionExecutor(ActionExecutor):
         self._last_click_time = now
 
 
-    def scroll(self, amount: int) -> None:
+    def scroll(self, amount: float) -> None:
         self._ensure_allowed()
-
-        if amount != 0:
-            from holocontrol.infrastructure.windows.window_context import (
-                canva_canvas_point, scroll_canva_canvas,
-            )
-            point = canva_canvas_point()
-            if point is not None:
-                self.move_cursor(*point)
-                scroll_canva_canvas(point, amount)
-                return
-            # The installed Windows backend passes raw wheel units to mouse_event.
-            # WHEEL_DELTA is 120 units per wheel notch.
-            pyautogui.scroll(amount * 120, _pause=False)
+        units = round(amount * 120)
+        if units:
+            # Use the normal Windows input path, including native wheel routing
+            # and FAILSAFE. No synthetic window messages, focus or cursor moves.
+            # The installed Windows backend takes raw wheel units.
+            pyautogui.scroll(units, _pause=False)
 
     def _target_canva_canvas(self) -> None:
         from holocontrol.infrastructure.windows.window_context import canva_canvas_point

@@ -32,11 +32,16 @@ def control():
 def test_two_fingers_already_high_scroll_without_initial_motion(control):
     _, executor, frame, _ = control
     frame('dos_dedos', y=.2)
+    executor.scroll.assert_not_called()
+    for _ in range(10):
+        frame('dos_dedos', FaseGesto.MANTENIMIENTO, y=.2)
     assert executor.scroll.call_args.args[0] > 0
     executor.scroll.reset_mock()
     frame('dos_dedos', FaseGesto.MANTENIMIENTO, y=.45)
     executor.scroll.assert_not_called()
     frame('dos_dedos', FaseGesto.MANTENIMIENTO, y=.7)
+    for _ in range(10):
+        frame('dos_dedos', FaseGesto.MANTENIMIENTO, y=.7)
     assert executor.scroll.call_args.args[0] < 0
 
 
@@ -47,6 +52,38 @@ def test_cursor_reaches_edges_inside_camera_even_with_smoothing(control):
     executor.move_cursor.assert_called_with(1919, 1079)
     frame('indice', FaseGesto.MANTENIMIENTO, x=.2, y=.15)
     executor.move_cursor.assert_called_with(0, 0)
+
+
+def test_scroll_is_bounded_and_stops_on_release(control):
+    _, executor, frame, _ = control
+    frame('dos_dedos', direction=-1)
+    for _ in range(39):
+        frame('dos_dedos', FaseGesto.MANTENIMIENTO, direction=-1)
+    assert executor.scroll.call_count >= 35
+    assert 4 <= -sum(call.args[0] for call in executor.scroll.call_args_list) <= 5
+    assert all(-.2 <= call.args[0] < 0 for call in executor.scroll.call_args_list)
+    frame('dos_dedos', FaseGesto.FIN)
+    executor.reset_mock()
+    frame('dos_dedos', direction=1)
+    executor.scroll.assert_not_called()
+    for _ in range(10):
+        frame('dos_dedos', FaseGesto.MANTENIMIENTO, direction=1)
+    assert all(0 < call.args[0] <= .2 for call in executor.scroll.call_args_list)
+
+
+def test_scroll_neutral_clears_pending_movement(control):
+    _, executor, frame, _ = control
+    frame('dos_dedos', direction=1)
+    for _ in range(5):
+        frame('dos_dedos', FaseGesto.MANTENIMIENTO, direction=1)
+    frame('dos_dedos', FaseGesto.MANTENIMIENTO, direction=0)
+    executor.reset_mock()
+    frame('dos_dedos', FaseGesto.MANTENIMIENTO, direction=0)
+    executor.scroll.assert_not_called()
+    for _ in range(4):
+        frame('dos_dedos', FaseGesto.MANTENIMIENTO, direction=-1)
+    assert executor.scroll.called
+    assert all(call.args[0] < 0 for call in executor.scroll.call_args_list)
 
 
 def test_fist_minimizes_only_once_per_hold(control):
@@ -138,22 +175,62 @@ def test_alt_released_even_at_failsafe_corner():
 def test_scroll_follows_finger_direction_even_at_same_camera_position(control, direction):
     _, executor, frame, _ = control
     frame('dos_dedos', y=.45, direction=direction, confidence=.65)
-    for _ in range(3):
+    for _ in range(10):
         frame('dos_dedos', FaseGesto.MANTENIMIENTO, y=.45, direction=direction, confidence=.65)
     assert executor.scroll.called
     assert all(call.args[0] * direction > 0 for call in executor.scroll.call_args_list)
 
 
 @pytest.mark.parametrize('amount', [-2, 2])
-def test_native_windows_receives_full_wheel_notches(amount):
+def test_windows_targets_control_without_mouse_movement(amount):
     import pyautogui
     e = WindowsActionExecutor()
     e.activate()
     e.set_hand_detected(True)
     with (patch.object(pyautogui, 'failSafeCheck'),
+          patch.object(pyautogui, 'position', return_value=(800, 500)),
+          patch.object(pyautogui, 'moveTo') as move,
+          patch('holocontrol.infrastructure.windows.window_context.canva_canvas_point', return_value=None),
           patch.object(pyautogui.platformModule, '_sendMouseEvent') as send):
         e.scroll(amount)
     assert send.call_args.kwargs['dwData'] == amount * 120
+    move.assert_not_called()
+
+
+@pytest.mark.parametrize('fps', [15, 30, 60])
+def test_continuous_scroll_reaches_windows_as_small_native_deltas(fps):
+    import pyautogui
+    from holocontrol.application.services.scroll_controller import ScrollController
+    controller = ScrollController()
+    executor = WindowsActionExecutor()
+    executor.activate()
+    executor.set_hand_detected(True)
+    sent = []
+    with (patch.object(pyautogui, 'position', return_value=(800, 500)),
+          patch.object(pyautogui.platformModule, '_position', return_value=(800, 500)),
+          patch.object(pyautogui, 'moveTo') as move,
+          patch('ctypes.windll.user32.ShowCursor') as visibility,
+          patch('ctypes.windll.user32.SendMessageTimeoutW') as direct_message,
+          patch.object(pyautogui.platformModule, '_sendMouseEvent') as native):
+        for i in range(4 * fps):
+            t = i / fps
+            amount = controller.update(1 if t < 2 else -1, t)
+            if amount:
+                native.reset_mock()
+                executor.scroll(amount)
+                native.assert_called_once()
+                assert native.call_args.args[0] == pyautogui.platformModule.MOUSEEVENTF_WHEEL
+                sent.append((t, native.call_args.kwargs['dwData']))
+        move.assert_not_called()
+        visibility.assert_not_called()
+        direct_message.assert_not_called()
+    for positive in (True, False):
+        segment = [(t, delta) for t, delta in sent if (t < 2) == positive]
+        assert len(segment) > fps
+        assert all(0 < abs(delta) <= 20 for _, delta in segment)
+        assert 480 <= abs(sum(delta for _, delta in segment)) <= 600
+        assert all((delta > 0) == positive for _, delta in segment)
+        assert all(b[0] - a[0] <= 1.01 / fps for a, b in zip(segment, segment[1:]))
 
 
 def test_thumb_click_does_not_move_or_drag_cursor(control):
@@ -176,15 +253,15 @@ def test_old_default_pinch_no_longer_clicks(control):
     executor.begin_pinch.assert_not_called()
 
 
-def test_zoom_expands_and_contracts_without_cursor_or_click(control):
+def test_removed_zoom_cannot_execute(control):
     _, executor, frame, _ = control
     frame('dos_dedos', separation=.4)
     frame('dos_dedos', FaseGesto.FIN, separation=.7)
     executor.reset_mock()
     frame('zoom', separation=.7)
-    assert executor.zoom.call_args.args[0] > 0
+    executor.zoom.assert_not_called()
     frame('zoom', FaseGesto.MANTENIMIENTO, separation=.3)
-    assert executor.zoom.call_args.args[0] < 0
+    executor.zoom.assert_not_called()
     executor.move_cursor.assert_not_called()
     executor.left_click.assert_not_called()
     frame('zoom', FaseGesto.FIN)

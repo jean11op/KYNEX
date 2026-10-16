@@ -22,6 +22,11 @@ class PruebasContratoWindowsExistente(unittest.TestCase):
         api.moveTo = Mock()
         api.click = Mock()
         api.scroll = Mock()
+        api.position = Mock(return_value=(500, 400))
+        api.failSafeCheck = Mock()
+        wheel = patch('holocontrol.infrastructure.windows.window_context.scroll_at_point')
+        self.wheel = wheel.start()
+        self.addCleanup(wheel.stop)
         self.api = api
         ruta = Path(__file__).resolve().parents[2] / 'src/holocontrol/infrastructure/windows/windows_action_executor.py'
         especificacion = importlib.util.spec_from_file_location("member2_windows_contract", ruta)
@@ -62,7 +67,8 @@ class PruebasContratoWindowsExistente(unittest.TestCase):
             self.aplicacion.estado_actual().generacion, instante, True,
             eventos=(EventoGesto("dos_dedos", FaseGesto.MANTENIMIENTO,
                                  round(instante * 1000), 100, 0.99),),
-            desplazamiento_vertical=0.1,
+            desplazamiento_vertical=0.2,
         ))
-        self.api.scroll.assert_called_once_with(-360, _pause=False)
+        self.api.scroll.assert_called_once_with(-120, _pause=False)
+        self.wheel.assert_not_called()
         self.api.click.assert_not_called()

@@ -85,9 +85,9 @@ def crear_nucleo(
         # Upgrade the old default click while preserving unrelated custom bindings.
         asignaciones = guardado.asignaciones
         asignaciones = tuple(
-            replace(a, id_accion='flechas')
-            if a.id_gesto == 'dos_dedos' and a.id_accion == 'desplazar_vertical' else a
-            for a in asignaciones)
+            replace(a, id_accion='desplazar_vertical')
+            if a.id_gesto == 'dos_dedos' and a.id_accion == 'flechas' else a
+            for a in asignaciones if a.id_gesto != 'zoom')
         if not any(a.id_gesto == 'pulgar_abajo' for a in asignaciones):
             asignaciones += (AsignacionGesto(guardado.id, 'pulgar_abajo', 'borrar'),)
         if not any(a.id_gesto == 'pulgar' for a in asignaciones):
@@ -100,7 +100,7 @@ def crear_nucleo(
                 asignaciones += (AsignacionGesto(guardado.id, 'pulgar', 'clic_izquierdo'),)
         existentes = {a.id_gesto for a in asignaciones}
         nuevas = tuple(AsignacionGesto(guardado.id, gesto, accion)
-                       for gesto, accion in (("menique", "enter"), ("cuernos", "escape"), ("deslizamiento_derecha", "volumen_subir"), ("deslizamiento_izquierda", "volumen_bajar"), ("puno", "minimizar"), ("tres_dedos", "cambiar_ventana"), ("zoom", "zoom"), ("like", "dictar"), ("pellizco", "arrastrar"))
+                       for gesto, accion in (("menique", "enter"), ("cuernos", "escape"), ("deslizamiento_derecha", "volumen_subir"), ("deslizamiento_izquierda", "volumen_bajar"), ("puno", "minimizar"), ("tres_dedos", "cambiar_ventana"), ("like", "dictar"), ("pellizco", "arrastrar"))
                        if gesto not in existentes)
         if nuevas or asignaciones != guardado.asignaciones:
             repositorio.actualizar(replace(guardado, asignaciones=asignaciones + nuevas))
@@ -220,7 +220,7 @@ class MainWindow(DashboardWindow):
         box.addLayout(grid)
         box.addWidget(button('Guardar asignaciones', self.save_gestures, 'primary'))
         box.addWidget(button('Restaurar predeterminados', self.restore_gestures))
-        box.addWidget(label('Pulgar lateral: clic; pistola (indice extendido y pulgar levantado): mantener clic y dibujar; dos dedos apuntando arriba, abajo, izquierda o derecha: flechas; solo meñique arriba: Enter; solo meñique hacia la izquierda de la pantalla: borrar un carácter, mantener 2 segundos: borrar todo el campo; separar/juntar dos dedos: zoom; like: activar/desactivar dictado; palma abierta 7 segundos: pausa; puño cerrado 2 segundos: minimizar una vez. Se usa únicamente la mano seleccionada en el perfil.', 'muted'))
+        box.addWidget(label('Pulgar lateral: clic; pistola (indice extendido y pulgar levantado): mantener clic y dibujar; dos dedos apuntando arriba o abajo: desplazamiento suave; solo meñique arriba: Enter; solo meñique hacia la izquierda de la pantalla: borrar un carácter, mantener 2 segundos: borrar todo el campo; like: activar/desactivar dictado; palma abierta 7 segundos: pausa; puño cerrado 2 segundos: minimizar una vez. Se usa únicamente la mano seleccionada en el perfil.', 'muted'))
         self.threshold = QSpinBox(self)
         self.threshold.hide()
         box.addStretch()

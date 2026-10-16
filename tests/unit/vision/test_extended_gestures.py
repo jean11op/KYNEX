@@ -30,7 +30,7 @@ def test_like_is_not_fist_and_fires_once_per_hold(crear_mano, crear_deteccion):
     assert all(e.nombre != 'puno' for e in events)
 
 
-def test_two_finger_spread_enters_zoom_until_posture_changes(crear_mano, crear_deteccion):
+def test_two_finger_spread_keeps_scrolling_until_posture_changes(crear_mano, crear_deteccion):
     processor = ProcesadorVision()
     hand = crear_mano('dos_dedos')
     processor.interpretar(crear_deteccion(hand,0))
@@ -44,11 +44,11 @@ def test_two_finger_spread_enters_zoom_until_posture_changes(crear_mano, crear_d
     spread = replace(hand,puntos=tuple(points))
     processor.interpretar(crear_deteccion(spread,150))
     result = processor.interpretar(crear_deteccion(spread,250))
-    assert any(e.nombre == 'zoom' and e.fase is FaseGesto.INICIO for e in result.eventos)
+    assert [(e.nombre, e.fase) for e in result.eventos] == [('dos_dedos', FaseGesto.MANTENIMIENTO)]
     result = processor.interpretar(crear_deteccion(hand,300))
-    assert any(e.nombre == 'zoom' and e.fase is FaseGesto.MANTENIMIENTO for e in result.eventos)
+    assert [(e.nombre, e.fase) for e in result.eventos] == [('dos_dedos', FaseGesto.MANTENIMIENTO)]
     result = processor.interpretar(crear_deteccion(crear_mano('indice'),350))
-    assert any(e.nombre == 'zoom' and e.fase is FaseGesto.FIN for e in result.eventos)
+    assert any(e.nombre == 'dos_dedos' and e.fase is FaseGesto.FIN for e in result.eventos)
 
 
 def test_lowering_like_does_not_minimize_typing_window(crear_mano, crear_deteccion):
@@ -68,6 +68,20 @@ def test_lowering_like_does_not_minimize_typing_window(crear_mano, crear_detecci
 import pytest
 from holocontrol.ports.vision.models import Lateralidad
 from holocontrol.infrastructure.vision.configuration import ConfiguracionVision
+
+
+def test_scroll_tolerates_brief_ambiguity_but_stops_after_grace(crear_mano):
+    from unittest.mock import patch
+    from holocontrol.infrastructure.vision.gesture_recognizer import ReconocedorGestos
+    recognizer = ReconocedorGestos()
+    hand = crear_mano('dos_dedos')
+    recognizer.procesar(hand, 0, 1)
+    recognizer.procesar(hand, 100, 1)
+    with patch.object(recognizer, '_clasificar', return_value=(None, 0)):
+        events = recognizer.procesar(hand, 150, 1)
+        assert [(e.nombre, e.fase) for e in events] == [('dos_dedos', FaseGesto.MANTENIMIENTO)]
+        events = recognizer.procesar(hand, 200, 1)
+        assert [(e.nombre, e.fase) for e in events] == [('dos_dedos', FaseGesto.FIN)]
 
 
 @pytest.mark.parametrize('selected', list(Lateralidad))
@@ -258,3 +272,35 @@ def test_two_finger_pointing_maps_to_four_arrows(turns, expected, crear_mano, cr
     result = processor.interpretar(crear_deteccion(hand, 100))
     assert result.eventos[0].nombre == 'dos_dedos'
     assert Reconocimiento.desde_vision(result, 1).direccion_flechas == expected
+
+
+@pytest.mark.parametrize('scale', [.15, .4, 1])
+@pytest.mark.parametrize('sign', [-1, 1])
+def test_scroll_orientation_is_independent_of_distance(scale, sign, crear_mano, crear_deteccion):
+    from holocontrol.application.dto.reconocimiento import Reconocimiento
+    hand = crear_mano('dos_dedos')
+    hand = replace(hand, puntos=tuple(replace(
+        p, x=.5 + (p.x-.5)*scale*sign, y=.5 + (p.y-.5)*scale*sign,
+        z=p.z*scale) for p in hand.puntos))
+    processor = ProcesadorVision()
+    processor.interpretar(crear_deteccion(hand, 0))
+    result = processor.interpretar(crear_deteccion(hand, 100))
+    assert any(e.nombre == 'dos_dedos' for e in result.eventos)
+    assert Reconocimiento.desde_vision(result, 1).direccion_scroll == pytest.approx(sign)
+
+
+def test_acquired_scroll_accepts_bent_fingers_but_not_a_different_pose(crear_mano):
+    from unittest.mock import patch
+    from holocontrol.infrastructure.vision.gesture_recognizer import ReconocedorGestos
+    from holocontrol.ports.vision.models import GestoBasico
+    recognizer = ReconocedorGestos()
+    hand = crear_mano('dos_dedos')
+    recognizer.procesar(hand, 0, 1)
+    recognizer.procesar(hand, 100, 1)
+    scores = ((GestoBasico.DOS_DEDOS, .5), (GestoBasico.INDICE, .5))
+    with patch('holocontrol.infrastructure.vision.gesture_recognizer.puntuar_posturas_basicas', return_value=scores):
+        for time in range(150, 750, 50):
+            events = recognizer.procesar(hand, time, 1)
+            assert [(e.nombre, e.fase) for e in events] == [('dos_dedos', FaseGesto.MANTENIMIENTO)]
+    events = recognizer.procesar(crear_mano('indice'), 800, 1)
+    assert any(e.nombre == 'dos_dedos' and e.fase is FaseGesto.FIN for e in events)

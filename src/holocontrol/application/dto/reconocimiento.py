@@ -45,11 +45,17 @@ class Reconocimiento:
         punto_indice = resultado.mano.puntos[8] if resultado.es_valido else None
         desplazamiento = resultado.desplazamiento_indice
         direccion_flechas = None
+        direccion_scroll = None
         if resultado.es_valido:
             p = resultado.mano.puntos
             # Palm-to-fingertip vectors make pointing independent of hand location.
             dx = sum(p[tip].x - p[base].x for base, tip in ((5, 8), (9, 12)))
             dy = sum(p[tip].y - p[base].y for base, tip in ((5, 8), (9, 12)))
+            dz = sum(p[tip].z - p[base].z for base, tip in ((5, 8), (9, 12)))
+            # Normalize orientation, not pixel distance: moving away from the
+            # camera must not make the down gesture fall below its threshold.
+            length = (dx * dx + dy * dy + dz * dz) ** .5
+            direccion_scroll = -dy / length if length > 1e-6 else 0.0
             if max(abs(dx), abs(dy)) >= .08:
                 direccion_flechas = ('right' if dx > 0 else 'left') if abs(dx) > abs(dy) * 1.2 else (
                     ('down' if dy > 0 else 'up') if abs(dy) > abs(dx) * 1.2 else None)
@@ -70,11 +76,7 @@ class Reconocimiento:
                 max(.001, dist((resultado.mano.puntos[5].x, resultado.mano.puntos[5].y),
                                (resultado.mano.puntos[17].x, resultado.mano.puntos[17].y)))
                 if resultado.es_valido else None),
-            direccion_scroll=(
-                max(-1.0, min(1.0, sum(resultado.mano.puntos[base].y - resultado.mano.puntos[tip].y
-                                        for base, tip in ((5, 8), (9, 12))) / .2))
-                if resultado.es_valido else None
-            ),
+            direccion_scroll=direccion_scroll,
             desplazamiento_vertical=desplazamiento[1] if desplazamiento else 0.0,
             estado_vision=resultado.estado,
             mensaje=resultado.mensaje,

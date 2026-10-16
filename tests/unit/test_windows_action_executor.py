@@ -255,12 +255,12 @@ def test_move_cursor_clamps_coordinates_to_screen():
     move_to.assert_called_once_with(1918, 1, duration=0, _pause=False)
 
 
-def test_scroll_calls_pyautogui():
+def test_scroll_uses_normal_wheel_input():
     executor = create_active_executor()
 
-    with patch(
-        "holocontrol.infrastructure.windows.windows_action_executor.pyautogui.scroll"
-    ) as scroll:
+    with (patch('pyautogui.position', return_value=(300, 300)),
+          patch('holocontrol.infrastructure.windows.window_context.canva_canvas_point', return_value=None),
+          patch('pyautogui.scroll') as scroll):
         executor.scroll(3)
 
     scroll.assert_called_once_with(360, _pause=False)
@@ -270,9 +270,9 @@ def test_scroll_calls_pyautogui():
 def test_scroll_passes_positive_and_negative_amounts(amount):
     executor = create_active_executor()
 
-    with patch(
-        "holocontrol.infrastructure.windows.windows_action_executor.pyautogui.scroll"
-    ) as scroll:
+    with (patch('pyautogui.position', return_value=(300, 300)),
+          patch('holocontrol.infrastructure.windows.window_context.canva_canvas_point', return_value=None),
+          patch('pyautogui.scroll') as scroll):
         executor.scroll(amount)
 
     scroll.assert_called_once_with(amount * 120, _pause=False)

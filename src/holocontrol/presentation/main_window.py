@@ -130,6 +130,7 @@ class MainWindow(QMainWindow):
             self.utility_buttons.append(item)
         shell.addWidget(rail)
         content = QVBoxLayout()
+        content.setSpacing(8)
         content.setContentsMargins(0, 16, 0, 12)
         header = QHBoxLayout()
         self.breadcrumb = label('ESPACIO PERSONAL  /  INICIO', 'eyebrow')
@@ -187,7 +188,7 @@ class MainWindow(QMainWindow):
             self.feedback.setText(str(error))
             return False
 
-    def page(self, title=None, subtitle=None):
+    def page(self, title=None, subtitle=None, *, scrollable=True):
         scroll = SmoothScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
@@ -201,7 +202,12 @@ class MainWindow(QMainWindow):
         if subtitle:
             box.addWidget(label(subtitle, 'muted'))
         scroll.setWidget(body)
-        self.stack.addWidget(scroll)
+        if scrollable:
+            self.stack.addWidget(scroll)
+        else:
+            scroll.takeWidget()
+            scroll.deleteLater()
+            self.stack.addWidget(body)
         return box
 
     def navigate(self, index):
@@ -213,7 +219,8 @@ class MainWindow(QMainWindow):
             self.set_mode('Dibujo')
 
     def build_dashboard(self):
-        box = self.page()
+        box = self.page(scrollable=False)
+        box.setSpacing(6)
         intro = QHBoxLayout()
         words = QVBoxLayout()
         words.setSpacing(4)
@@ -224,13 +231,14 @@ class MainWindow(QMainWindow):
         prepare.setIcon(icon('sparkle', '#ffffff'))
         intro.addWidget(prepare, alignment=Qt.AlignmentFlag.AlignVCenter)
         box.addLayout(intro)
-        box.addSpacing(5)
+        box.addSpacing(0)
         top = QHBoxLayout()
         top.setSpacing(16)
         self.preview = HandPreview()
-        top.addWidget(self.preview, 72)
+        top.addWidget(self.preview, 60)
         state, sb = panel('Estado de tu espacio')
-        sb.setSpacing(6)
+        sb.setContentsMargins(12, 8, 12, 8)
+        sb.setSpacing(2)
         state.setMinimumWidth(265)
         self.camera_status_label = label('No conectada', 'muted')
         self.recognition_status_label = label('No conectado', 'muted')
@@ -266,7 +274,7 @@ class MainWindow(QMainWindow):
         sb.addStretch()
         sb.addWidget(label('01  /  Prepara tu movimiento', 'accent'))
         sb.addWidget(button('Ir a calibración  →', lambda: self.navigate(2), 'secondary'))
-        top.addWidget(state, 28)
+        top.addWidget(state, 40)
         box.addLayout(top, 6)
         bottom = QHBoxLayout()
         bottom.setSpacing(14)
@@ -275,8 +283,9 @@ class MainWindow(QMainWindow):
         grid.setSpacing(8)
         for i, title in enumerate(getattr(self, 'quick_gesture_names', ['Seleccionar', 'Clic', 'Arrastrar', 'Desplazar', 'Pausar', 'Pestañas'])):
             item = button('', lambda checked=False, index=i: self.open_gesture(index), 'gesture')
+            item.setStyleSheet('QPushButton#gesture { padding: 2px; }')
             tile = QVBoxLayout(item)
-            tile.setContentsMargins(5, 10, 5, 8)
+            tile.setContentsMargins(2, 4, 2, 4)
             tile.setSpacing(6)
             glyph = QLabel()
             glyph.setPixmap(icon(['cursor', 'click', 'drag', 'scroll', 'pause', 'tabs'][i]).pixmap(24, 24))
@@ -287,7 +296,7 @@ class MainWindow(QMainWindow):
                 child.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
                 tile.addWidget(child)
             item.setAccessibleName(title)
-            item.setMinimumHeight(76)
+            item.setMinimumHeight(56)
             item.setToolTip('Configurar: ' + title)
             grid.addWidget(item, i // 3, i % 3)
         qb.addLayout(grid)
@@ -318,6 +327,7 @@ class MainWindow(QMainWindow):
             presets.addWidget(button(title, lambda checked=False, v=value: self.apply_sensitivity_preset(v), 'chip'))
         se.addLayout(presets)
         self.dial = SensitivityDial()
+        self.dial.setMinimumSize(90, 60)
         se.addWidget(self.dial, 1)
         self.sensitivity = QSlider(Qt.Orientation.Horizontal)
         self.sensitivity.setRange(25, 200)
@@ -328,11 +338,17 @@ class MainWindow(QMainWindow):
         se.addWidget(label('Preferencia del perfil', 'muted'))
         bottom.addWidget(sensitivity, 24)
         hand, hb = panel('Mapa de mano')
-        hb.addWidget(HandMap(), 1)
+        hand_map = HandMap()
+        hand_map.setMinimumSize(90, 90)
+        hb.addWidget(hand_map, 1)
         hb.addWidget(label('21 puntos de referencia\nIlustración, sin señal', 'muted'))
         bottom.addWidget(hand, 18)
+        for card in (quick, stats, sensitivity, hand):
+            card.layout().setContentsMargins(12, 8, 12, 8)
+            card.layout().setSpacing(4)
         box.addLayout(bottom, 4)
         actions, ab = panel()
+        ab.setContentsMargins(12, 8, 12, 8)
         row = QHBoxLayout()
         self.control_status_label = label('●  Control detenido', 'accent')
         row.addWidget(self.control_status_label)

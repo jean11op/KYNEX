@@ -22,14 +22,14 @@ def test_zoom_releases_ctrl_even_on_scroll_failure():
 
 
 @pytest.mark.parametrize('amount', [-2, 2])
-def test_canva_scroll_targets_canvas_without_clicking(amount):
+def test_canva_scroll_does_not_reposition_cursor(amount):
     e=active()
     with patch('holocontrol.infrastructure.windows.window_context.canva_canvas_point', return_value=(900,500)), patch('holocontrol.infrastructure.windows.window_context.scroll_canva_canvas') as wheel, patch('holocontrol.infrastructure.windows.windows_action_executor.pyautogui') as api:
         api.size.return_value=(1920,1080)
         e.scroll(amount)
-        api.moveTo.assert_called_once_with(900,500,duration=0,_pause=False)
-        wheel.assert_called_once_with((900,500), amount)
-        api.scroll.assert_not_called()
+        api.moveTo.assert_not_called()
+        wheel.assert_not_called()
+        api.scroll.assert_called_once_with(amount * 120, _pause=False)
         api.click.assert_not_called()
         api.press.assert_not_called()
 
@@ -64,6 +64,34 @@ def test_canva_timeout_is_reported_without_duplicate_wheel():
         with pytest.raises(RuntimeError, match='Canva'):
             scroll_canva_canvas((900, 500), -2)
         assert api.SendMessageTimeoutW.call_count == 1
+
+
+def test_scroll_reversal_targets_same_child_without_focus_or_pointer_change():
+    from holocontrol.infrastructure.windows.window_context import scroll_at_point
+    with patch('ctypes.windll.user32') as api:
+        api.WindowFromPoint.return_value = 42
+        api.SendMessageTimeoutW.return_value = 1
+        scroll_at_point((-300, 500), 1)
+        scroll_at_point((-300, 500), -1)
+        calls = api.SendMessageTimeoutW.call_args_list
+        assert [c.args[0] for c in calls] == [42, 42]
+        assert [c.args[2] for c in calls] == [120 << 16, 0xff88 << 16]
+        assert all(c.args[3] == (0xfed4 | (500 << 16)) for c in calls)
+        api.SetFocus.assert_not_called()
+        api.SetCursorPos.assert_not_called()
+
+
+def test_scroll_error_does_not_fall_back_to_duplicate_input():
+    e = active()
+    with (patch('holocontrol.infrastructure.windows.window_context.canva_canvas_point', return_value=None),
+          patch('holocontrol.infrastructure.windows.window_context.scroll_at_point', side_effect=RuntimeError('timeout')),
+          patch('holocontrol.infrastructure.windows.windows_action_executor.pyautogui') as api):
+        api.position.return_value = (800, 500)
+        api.scroll.side_effect = RuntimeError('timeout')
+        with pytest.raises(RuntimeError, match='timeout'):
+            e.scroll(-1)
+        api.scroll.assert_called_once_with(-120, _pause=False)
+        api.click.assert_not_called()
 
 
 def test_voice_toggle_and_stop_preserve_text_focus():

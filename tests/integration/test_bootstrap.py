@@ -208,15 +208,16 @@ def test_old_pinch_click_migrates_once_to_thumb(tmp_path, enabled):
         assert thumb[0].id_accion == 'clic_izquierdo'
 
 
-def test_existing_profiles_receive_arrows_and_delete_without_losing_fist(tmp_path):
+def test_existing_profiles_receive_scroll_and_delete_without_losing_fist(tmp_path):
     path = tmp_path / 'upgrade.sqlite3'
     first = crear_nucleo(path, ejecutor_existente=EjecutorSimulado(), proveedor_vision=ProveedorSimulado())
     profile = first.repositorio.obtener(first.id_perfil)
-    first.aplicacion.configurar_gesto(profile.id, 'dos_dedos', 'desplazar_vertical', reemplazar_existente=True)
+    first.aplicacion.configurar_gesto(profile.id, 'dos_dedos', 'flechas', reemplazar_existente=True)
     with BaseDatos(path).transaccion() as connection:
         connection.execute("DELETE FROM AsignacionGesto WHERE id_gesto='pulgar_abajo'")
     second = crear_nucleo(path, ejecutor_existente=EjecutorSimulado(), proveedor_vision=ProveedorSimulado())
     bindings = {a.id_gesto: (a.id_accion, a.activo) for a in second.repositorio.obtener(profile.id).asignaciones}
-    assert bindings['dos_dedos'] == ('flechas', True)
+    assert bindings['dos_dedos'] == ('desplazar_vertical', True)
+    assert 'zoom' not in bindings
     assert bindings['pulgar_abajo'] == ('borrar', True)
     assert bindings['puno'] == ('minimizar', True)

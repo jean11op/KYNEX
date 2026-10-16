@@ -1,4 +1,4 @@
-"""Identify Canva's canvas without clicking or changing the keyboard focus."""
+"""Deliver wheel input to the pointed control without changing keyboard focus."""
 import ctypes
 from ctypes import wintypes
 
@@ -24,6 +24,10 @@ def canva_canvas_point():
 
 
 def scroll_canva_canvas(point, amount):
+    scroll_at_point(point, amount, 'Canva')
+
+
+def scroll_at_point(point, amount, target='El control bajo el puntero'):
     """Deliver wheel input to the editor's native child window, not keyboard focus."""
     api = ctypes.windll.user32
     api.WindowFromPoint.argtypes = [wintypes.POINT]
@@ -36,7 +40,7 @@ def scroll_canva_canvas(point, amount):
     x, y = point
     window = api.WindowFromPoint(wintypes.POINT(x, y))
     if not window:
-        raise RuntimeError("No se pudo localizar el editor de Canva.")
+        raise RuntimeError(f"{target}: no se pudo localizar la ventana.")
     # WM_MOUSEWHEEL: signed delta in high word; screen coordinates in lParam.
     # No modifiers: Ctrl/Shift would change zoom or scroll direction.
     position = (x & 0xffff) | ((y & 0xffff) << 16)
@@ -45,4 +49,4 @@ def scroll_canva_canvas(point, amount):
         delta = 120 if amount > 0 else -120
         if not api.SendMessageTimeoutW(window, 0x020A, (delta & 0xffff) << 16,
                                       position, 0x0002, 50, ctypes.byref(result)):
-            raise RuntimeError("Canva no respondió al desplazamiento.")
+            raise RuntimeError(f"{target} no respondió al desplazamiento.")

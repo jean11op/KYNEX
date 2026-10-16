@@ -39,9 +39,21 @@ class DashboardTest(unittest.TestCase):
             item.click()
             self.assertEqual(self.window.stack.currentIndex(), index)
         self.assertFalse(self.window.start_button.isEnabled())
-        self.assertEqual(self.window.preview.accessibleName(), 'C?mara apagada')
+        self.assertEqual(self.window.preview.accessibleName(), 'Cámara apagada')
         self.window.pause_control()
         self.assertIn('no hay un motor', self.window.feedback.text())
+
+    def test_dashboard_fits_without_scroll_at_supported_sizes(self):
+        from PySide6.QtWidgets import QScrollArea, QWidget
+        page = self.window.stack.widget(0)
+        self.assertNotIsInstance(page, QScrollArea)
+        for width, height in ((1000, 700), (1366, 768), (1440, 940)):
+            self.window.resize(width, height)
+            self.window.show()
+            self.app.processEvents()
+            self.assertLessEqual(page.minimumSizeHint().height(), page.height())
+            for child in page.findChildren(QWidget, options=Qt.FindDirectChildrenOnly):
+                self.assertTrue(page.rect().contains(child.geometry()), child.objectName())
 
     def test_profile_form_and_reload(self):
         def fill():

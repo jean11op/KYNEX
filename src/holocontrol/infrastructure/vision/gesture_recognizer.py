@@ -32,9 +32,6 @@ class ReconocedorGestos:
         if len({plantilla.nombre for plantilla in self.plantillas}) != len(self.plantillas):
             raise ValueError("Las plantillas deben tener nombres distintos.")
         self._thumb_click = ThumbClick()
-        self._zoom_base = None
-        self._zoom_centro = None
-        self._zoom_activo = False
         self._activo: str | None = None
         self._candidato: str | None = None
         self._inicio_candidato_ms = 0
@@ -46,6 +43,7 @@ class ReconocedorGestos:
         self._discreto_consumido = False
         self._ultimo_tres_dedos_ms = -1000
         self._ultimo_cursor_valido_ms = -1000
+        self._ultimo_scroll_valido_ms = -1000
 
     @property
     def esperando_puno(self) -> bool:
@@ -53,8 +51,7 @@ class ReconocedorGestos:
 
     def reiniciar(self, instante_ms: int) -> tuple[EventoGesto, ...]:
         self._thumb_click.reset()
-        self._zoom_base = None
-        self._zoom_activo = False
+        self._ultimo_scroll_valido_ms = -1000
         self._ultimo_tres_dedos_ms = -1000
         self._ultimo_cursor_valido_ms = -1000
         eventos = self._terminar_activo(instante_ms)
@@ -89,6 +86,12 @@ class ReconocedorGestos:
             return None, 0.0
         posturas = puntuar_posturas_basicas(puntos)
         nombre, confianza = max(posturas, key=lambda postura: postura[1])
+        scroll_score = dict(posturas)[GestoBasico.DOS_DEDOS]
+        if (self._activo == GestoBasico.DOS_DEDOS.value
+                and confianza < self.configuracion.umbral_gesto and scroll_score >= .45):
+            # Once acquired, allow a slight bend while rotating the hand. A clear
+            # different posture still ends scrolling immediately.
+            return GestoBasico.DOS_DEDOS.value, self.configuracion.umbral_gesto
         if nombre is GestoBasico.PUNO and confianza >= self.configuracion.umbral_gesto:
             if (puntos[3][1] - puntos[4][1] > ancho_palma * .20
                     and puntos[2][1] - puntos[4][1] > ancho_palma * .5
@@ -165,23 +168,6 @@ class ReconocedorGestos:
                 events.extend(EventoGesto("pulgar", phase, instante_ms, 0, 1.0)
                               for phase in (FaseGesto.INICIO, FaseGesto.FIN))
             return tuple(events)
-        if nombre == GestoBasico.DOS_DEDOS.value:
-            puntos = coordenadas_mano(mano, relacion_aspecto)
-            separation = distancia(puntos[8], puntos[12]) / distancia(puntos[5], puntos[17])
-            center = ((mano.puntos[8].x + mano.puntos[12].x)/2,
-                      (mano.puntos[8].y + mano.puntos[12].y)/2)
-            if self._zoom_base is None:
-                self._zoom_base, self._zoom_centro = separation, center
-            elif not self._zoom_activo:
-                if distancia(center, self._zoom_centro) > .05:
-                    self._zoom_base, self._zoom_centro = separation, center
-                elif abs(separation - self._zoom_base) >= .22:
-                    self._zoom_activo = True
-            if self._zoom_activo:
-                nombre = GestoBasico.ZOOM.value
-        else:
-            self._zoom_base = None
-            self._zoom_activo = False
         if self._activo == GestoBasico.TRES_DEDOS.value and nombre is None:
             puntuacion = dict(puntuar_posturas_basicas(coordenadas_mano(mano, relacion_aspecto)))[GestoBasico.TRES_DEDOS]
             if puntuacion >= .35:
@@ -193,6 +179,11 @@ class ReconocedorGestos:
             puntuacion = dict(puntuar_posturas_basicas(coordenadas_mano(mano, relacion_aspecto)))[GestoBasico.TRES_DEDOS]
             if puntuacion >= .35:
                 self._ultimo_tres_dedos_ms = instante_ms
+        if nombre == GestoBasico.DOS_DEDOS.value:
+            self._ultimo_scroll_valido_ms = instante_ms
+        elif (nombre is None and self._activo == GestoBasico.DOS_DEDOS.value
+              and instante_ms - self._ultimo_scroll_valido_ms <= 80):
+            nombre, confianza = GestoBasico.DOS_DEDOS.value, self._confianza_activa
         if nombre == GestoBasico.INDICE.value:
             self._ultimo_cursor_valido_ms = instante_ms
         elif (nombre is None and self._activo == GestoBasico.INDICE.value

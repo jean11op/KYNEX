@@ -111,18 +111,22 @@ class PruebasIntegracionVision(unittest.TestCase):
 
     def test_scroll_continuo_signo_y_fracciones(self):
         for fase in (FaseGesto.INICIO, FaseGesto.MANTENIMIENTO):
-            self.enviar(self.evento("dos_dedos", fase), desplazamiento_vertical=0.02)
+            self.enviar(self.evento("dos_dedos", fase), desplazamiento_vertical=0.1)
             self.reloj.avanzar(0.01)
         self.assertEqual(self.ejecutor.llamadas, [("desplazar", -1)])
         self.enviar(self.evento("dos_dedos", FaseGesto.MANTENIMIENTO),
-                    desplazamiento_vertical=-0.1)
-        self.assertEqual(self.ejecutor.llamadas[-1], ("desplazar", 2))
+                    desplazamiento_vertical=-0.2)
+        self.assertEqual(self.ejecutor.llamadas[-1], ("desplazar", 1))
 
     def test_delta_scroll_se_aplica_una_vez_por_lote(self):
         self.enviar(self.evento("dos_dedos", delta_ms=-10),
                     self.evento("dos_dedos", FaseGesto.MANTENIMIENTO),
                     desplazamiento_vertical=0.1)
-        self.assertEqual(self.ejecutor.llamadas, [("desplazar", -3)])
+        self.assertEqual(self.ejecutor.llamadas, [])
+        self.reloj.avanzar(0.01)
+        self.enviar(self.evento("dos_dedos", FaseGesto.MANTENIMIENTO),
+                    desplazamiento_vertical=0.1)
+        self.assertEqual(self.ejecutor.llamadas, [("desplazar", -1)])
 
     def test_scroll_cero_no_produce_accion(self):
         self.assertEqual(self.enviar(self.evento("dos_dedos")).motivo, "sin_desplazamiento")

@@ -25,8 +25,8 @@ class HandPreview(QWidget):
         self.live_image = QImage()
         self.live_mode = False
         self.landmarks = ()
-        self.setMinimumSize(430, 330)
-        self.setAccessibleName('Ilustración de una mano. Cámara y reconocimiento no conectados.')
+        self.setMinimumSize(320, 220)
+        self.setAccessibleName('Cámara apagada')
 
     def set_camera_frame(self, frame, active=True):
         self.live_mode = active
@@ -75,7 +75,7 @@ class HandPreview(QWidget):
         p.resetTransform()
         p.setPen(QColor('#9caebe'))
         p.setFont(QFont('Segoe UI', 11))
-        p.drawText(QRectF(0, h / 2 + 38, w, 30), Qt.AlignmentFlag.AlignCenter, 'C?mara apagada')
+        p.drawText(QRectF(0, h / 2 + 38, w, 30), Qt.AlignmentFlag.AlignCenter, 'Cámara apagada')
 
 
 class SensitivityDial(QWidget):

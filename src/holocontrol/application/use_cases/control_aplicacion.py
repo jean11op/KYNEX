@@ -6,6 +6,7 @@ from uuid import uuid4
 
 from holocontrol.application.dto.reconocimiento import Reconocimiento
 from holocontrol.application.dto.resultados import EstadoActualControl, ResultadoGesto
+from holocontrol.application.services.scroll_controller import ScrollController
 from holocontrol.domain.entities import (
     AsignacionGesto,
     Calibracion,
@@ -53,6 +54,7 @@ class AplicacionControl:
         self._zoom_ancla = None
         self._scroll_ancla = None
         self._scroll_instante = None
+        self._scroll_control = ScrollController()
         self._ultimo_evento = float('-inf')
         self._eventos_del_instante: set[tuple[str, FaseGesto]] = set()
         self._inicio_sesion = float('-inf')
@@ -209,6 +211,7 @@ class AplicacionControl:
             return self._guardar_cambios(replace(perfil, asignaciones=asignaciones_predeterminadas(id_perfil)))
 
     def _reiniciar_deteccion(self) -> None:
+        self._scroll_control.reset()
         self._zoom_ancla = None
         self._scroll_ancla = None
         self._scroll_instante = None
@@ -417,6 +420,7 @@ class AplicacionControl:
                 self._ejecutor.establecer_mano_detectada(mano)
                 self._mano = mano
                 if not mano:
+                    self._scroll_control.reset()
                     self._flecha = None
                     self._inicio_borrado = None
                     self._zoom_ancla = None
@@ -453,6 +457,7 @@ class AplicacionControl:
                         if evento.fase is FaseGesto.FIN:
                             if nombre == 'dos_dedos':
                                 self._flecha = None
+                                self._scroll_control.reset()
                             if nombre == 'pulgar_abajo':
                                 self._inicio_borrado = None
                             if nombre == 'pellizco' and getattr(self._ejecutor, 'admite_arrastre', False):
@@ -606,6 +611,12 @@ class AplicacionControl:
         elif accion.id == "desplazar_vertical":
             if fotograma.separacion_dedos is not None:
                 self._zoom_ancla = fotograma.separacion_dedos
+            if fotograma.direccion_scroll is not None and fase is not None:
+                cantidad = self._scroll_control.update(fotograma.direccion_scroll, instante)
+                if not cantidad:
+                    return ResultadoGesto(False, 'sin_desplazamiento', accion.id)
+                self._ejecutor.desplazar(cantidad)
+                return ResultadoGesto(True, 'accion_enviada', accion.id)
             if fotograma.y is not None and fase is not None:
                 if self._scroll_ancla is None:
                     self._scroll_ancla = .45
@@ -617,17 +628,16 @@ class AplicacionControl:
                 distancia = y - self._scroll_ancla
                 # Fixed neutral zone: raising two fingers already high scrolls immediately.
                 exceso = max(0, abs(distancia) - .06)
-                velocidad = min(24, exceso * 120)
-                if fotograma.direccion_scroll is not None:
-                    direccion = fotograma.direccion_scroll
-                    velocidad_firmada = 18 * direccion if abs(direccion) >= .25 else 0
-                else:
-                    velocidad_firmada = (-1 if distancia > 0 else 1) * velocidad
+                velocidad = min(2.5, exceso * 12)
+                velocidad_firmada = (-1 if distancia > 0 else 1) * velocidad
+                if velocidad_firmada == 0 or self._resto_scroll * velocidad_firmada < 0:
+                    self._resto_scroll = 0.0
                 self._resto_scroll += velocidad_firmada * dt
             else:
-                self._resto_scroll -= fotograma.desplazamiento_vertical * 30
-            cantidad = int(self._resto_scroll)
-            self._resto_scroll -= cantidad
+                self._resto_scroll -= fotograma.desplazamiento_vertical * 6
+            cantidad = max(-1, min(1, int(self._resto_scroll)))
+            if cantidad:
+                self._resto_scroll = 0.0
             if not cantidad:
                 return ResultadoGesto(False, "sin_desplazamiento", accion.id)
             self._ejecutor.desplazar(cantidad)
