@@ -1,0 +1,124 @@
+from dataclasses import dataclass
+from math import dist
+
+from holocontrol.domain.errores import ErrorDominio
+from holocontrol.domain.rules.validacion import validar_entero, validar_numero, validar_texto
+from holocontrol.ports.vision.models import EstadoVision, EventoGesto, ResultadoVision
+
+
+@dataclass(frozen=True)
+class Reconocimiento:
+    """Un resultado por fotograma, incluso si no se detecta mano o gesto.
+
+    generacion procede de iniciar_control/reanudar_control. instante_captura utiliza
+    el mismo reloj monotónico del proceso. x/y son puntos normalizados crudos;
+    la aplicación aplica calibración, sensibilidad y suavizado.
+    Los eventos tienen tiempos propios en milisegundos y se conservan en orden.
+    id_gesto/confianza permiten consumir el contrato anterior de un solo gesto.
+    """
+    generacion: int
+    instante_captura: float
+    mano_detectada: bool
+    id_gesto: str | None = None
+    confianza: float = 0.0
+    x: float | None = None
+    y: float | None = None
+
+
+    eventos: tuple[EventoGesto, ...] = ()
+    desplazamiento_vertical: float = 0.0
+    direccion_scroll: float | None = None
+    direccion_flechas: str | None = None
+    separacion_dedos: float | None = None
+    centro_palma: tuple[float, float] | None = None
+    estado_vision: EstadoVision | None = None
+    mensaje: str = ""
+
+
+    @classmethod
+    def desde_vision(cls, resultado: ResultadoVision, generacion: int) -> "Reconocimiento":
+        """La generación es la del trabajador que produjo el resultado.
+
+        Nunca etiquetar resultados pendientes con la generación de una nueva sesión.
+        Convierte milisegundos a segundos y conserva el orden del proveedor.
+        """
+        punto_indice = resultado.mano.puntos[8] if resultado.es_valido else None
+        desplazamiento = resultado.desplazamiento_indice
+        direccion_flechas = None
+        direccion_scroll = None
+        if resultado.es_valido:
+            p = resultado.mano.puntos
+            # Palm-to-fingertip vectors make pointing independent of hand location.
+            dx = sum(p[tip].x - p[base].x for base, tip in ((5, 8), (9, 12)))
+            dy = sum(p[tip].y - p[base].y for base, tip in ((5, 8), (9, 12)))
+            dz = sum(p[tip].z - p[base].z for base, tip in ((5, 8), (9, 12)))
+            # Normalize orientation, not pixel distance: moving away from the
+            # camera must not make the down gesture fall below its threshold.
+            length = (dx * dx + dy * dy + dz * dz) ** .5
+            direccion_scroll = -dy / length if length > 1e-6 else 0.0
+            if max(abs(dx), abs(dy)) >= .08:
+                direccion_flechas = ('right' if dx > 0 else 'left') if abs(dx) > abs(dy) * 1.2 else (
+                    ('down' if dy > 0 else 'up') if abs(dy) > abs(dx) * 1.2 else None)
+
+        return cls(
+            generacion=generacion,
+            instante_captura=resultado.instante_ms / 1000,
+            mano_detectada=resultado.es_valido,
+            x=punto_indice.x if punto_indice else None,
+            y=punto_indice.y if punto_indice else None,
+            eventos=resultado.eventos,
+            direccion_flechas=direccion_flechas,
+            centro_palma=((resultado.mano.puntos[9].x, resultado.mano.puntos[9].y)
+                          if resultado.es_valido else None),
+            separacion_dedos=(
+                dist((resultado.mano.puntos[8].x, resultado.mano.puntos[8].y),
+                     (resultado.mano.puntos[12].x, resultado.mano.puntos[12].y)) /
+                max(.001, dist((resultado.mano.puntos[5].x, resultado.mano.puntos[5].y),
+                               (resultado.mano.puntos[17].x, resultado.mano.puntos[17].y)))
+                if resultado.es_valido else None),
+            direccion_scroll=direccion_scroll,
+            desplazamiento_vertical=desplazamiento[1] if desplazamiento else 0.0,
+            estado_vision=resultado.estado,
+            mensaje=resultado.mensaje,
+        )
+
+    def __post_init__(self):
+
+        object.__setattr__(self, "eventos", tuple(self.eventos))
+
+        if any(not isinstance(evento, EventoGesto) for evento in self.eventos):
+            raise ErrorDominio("Los eventos deben cumplir el contrato de visión.")
+
+        if self.estado_vision is not None and not isinstance(self.estado_vision, EstadoVision):
+            raise ErrorDominio("Estado de visión inválido.")
+
+        validar_numero(
+            self.desplazamiento_vertical,
+            "Desplazamiento vertical",
+            -1,
+            1,
+        )
+
+        if self.separacion_dedos is not None:
+            validar_numero(self.separacion_dedos, "Separacion", 0, 1500)
+        if self.centro_palma is not None:
+            if len(self.centro_palma) != 2:
+                raise ErrorDominio("Centro de palma invalido.")
+            for coordinate in self.centro_palma:
+                validar_numero(coordinate, "Centro de palma", 0, 1)
+        if self.direccion_scroll is not None:
+            validar_numero(self.direccion_scroll, "Dirección de scroll", -1, 1)
+        if self.direccion_flechas not in (None, 'up', 'down', 'left', 'right'):
+            raise ErrorDominio("Dirección de flechas inválida.")
+        validar_entero(self.generacion, "Generación", 0, 2**63 - 1)
+        validar_numero(self.instante_captura, "Instante", 0, 1e15)
+        validar_numero(self.confianza, "Confianza", 0, 1)
+        if type(self.mano_detectada) is not bool:
+            raise ErrorDominio("Detección inválida.")
+        if self.id_gesto is not None:
+            validar_texto(self.id_gesto, "Gesto")
+        if (self.x is None) != (self.y is None):
+            raise ErrorDominio("Indique ambas coordenadas.")
+        if self.x is not None:
+            validar_numero(self.x, "Coordenada x", 0, 1)
+            validar_numero(self.y, "Coordenada y", 0, 1)
