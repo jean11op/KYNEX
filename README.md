@@ -1,4 +1,4 @@
-# HoloControl-Access
+# KYNEX
 Aplicación de control accesible de Windows mediante gestos de las manos
 
 ## Ejecutar en Windows
