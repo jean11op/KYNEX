@@ -161,6 +161,59 @@ class TestDashboardCore:
             is EstadoControl.STOPPED and self.window._futuro is None
         )
 
+    def test_inicio_libera_sesion_antes_de_cambiar_camara_sin_sondeo_doble(self, monkeypatch):
+        from unittest.mock import Mock
+        monkeypatch.setattr('holocontrol.bootstrap.AdaptadorVision', type(self.proveedor))
+        probe = Mock(side_effect=AssertionError('No abrir dos veces una cámara explícita'))
+        monkeypatch.setattr('holocontrol.bootstrap.seleccionar_camara', probe)
+        self.window.camera_selector.setCurrentIndex(self.window.camera_selector.findData(1))
+        self.proveedor._activo = True
+        original = self.proveedor.detener
+        def detener(espera_s):
+            assert not hasattr(self.proveedor, 'camara') or not self.proveedor.en_ejecucion
+            return original(espera_s)
+        monkeypatch.setattr(self.proveedor, 'detener', detener)
+        self.window.start_control()
+        self._esperar(lambda: self.window._futuro is None)
+        assert self.proveedor.camara.indice == 1
+        assert self.componentes.aplicacion.estado_actual().estado is EstadoControl.ACTIVE
+        probe.assert_not_called()
+        monkeypatch.setattr(self.proveedor, 'detener', original)
+
+    def test_buscar_camaras_actualiza_lista_y_conserva_seleccion(self, monkeypatch):
+        self.window.camera_selector.setCurrentIndex(self.window.camera_selector.findData(1))
+        def buscar(indices):
+            assert not self.proveedor.en_ejecucion
+            return (0, 1, 7)
+        monkeypatch.setattr('holocontrol.bootstrap.detectar_camaras', buscar)
+        self.window.camera_scan_button.click()
+        self._esperar(lambda: self.window._futuro is None)
+        assert self.window.camera_selector.currentData() == 1
+        assert [self.window.camera_selector.itemData(i) for i in range(4)] == [-1, 0, 1, 7]
+        assert '3 cámaras' in self.window.camera_hint.text()
+        self.window.camera_selector.setCurrentIndex(3)
+        assert self.window.preferences.data['camera_selection'] == 7
+        assert self.window.camera_scan_button.isEnabled()
+
+    def test_buscar_camaras_no_sustituye_camara_desconectada(self, monkeypatch):
+        self.window.camera_selector.setCurrentIndex(self.window.camera_selector.findData(1))
+        monkeypatch.setattr('holocontrol.bootstrap.detectar_camaras', lambda indices: ())
+        self.window.camera_scan_button.click()
+        self._esperar(lambda: self.window._futuro is None)
+        assert self.window.camera_selector.currentData() == 1
+        assert 'no disponible' in self.window.camera_selector.currentText()
+        assert 'No se encontró' in self.window.camera_hint.text()
+
+    def test_probar_camara_abre_vista_previa_sin_acciones(self, monkeypatch):
+        from unittest.mock import Mock
+        preview = Mock()
+        monkeypatch.setattr(self.window, 'start_control', preview)
+        self.window.camera_test_button.click()
+        self._esperar(lambda: self.window._futuro is None)
+        preview.assert_called_once_with(vista_previa=True)
+        assert self.window.stack.currentIndex() == 0
+        assert 'ejecutor_activo' not in self.eventos
+
     def test_perfiles_mostrados_y_seleccionados_salen_de_sqlite(self):
         otro = self.componentes.aplicacion.crear_perfil("Perfil izquierdo", Mano.IZQUIERDA)
         self.window.refresh()

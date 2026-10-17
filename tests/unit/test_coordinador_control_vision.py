@@ -87,6 +87,31 @@ def _resultado_clic(instante_ms):
     )
 
 
+def test_cierre_usb_lento_termina_antes_de_iniciar_otra_sesion():
+    from unittest.mock import Mock
+    _, _, _, proveedor, coordinador = _configurar()
+    original = proveedor.detener
+    def cerrar(espera_s):
+        assert espera_s >= 5
+        return original(espera_s)
+    proveedor.detener = Mock(side_effect=cerrar)
+    coordinador.iniciar_control(ancho_pantalla=1280, alto_pantalla=720)
+    assert proveedor.en_ejecucion
+    proveedor.detener.assert_called_once_with(10.0)
+
+
+def test_camara_bloqueada_no_se_solapa_con_otra_sesion():
+    from unittest.mock import Mock
+    import pytest
+    from holocontrol.domain.errores import ErrorControl
+    _, _, _, proveedor, coordinador = _configurar()
+    proveedor.detener = Mock(return_value=False)
+    proveedor.iniciar = Mock()
+    with pytest.raises(ErrorControl, match='no respondió al cierre'):
+        coordinador.iniciar_control(ancho_pantalla=1280, alto_pantalla=720)
+    proveedor.iniciar.assert_not_called()
+
+
 def test_resultado_de_trabajador_antiguo_que_llega_tarde_no_actua():
     reloj, ejecutor, aplicacion, proveedor, coordinador = _configurar()
     primera = coordinador.iniciar_control(ancho_pantalla=100, alto_pantalla=100)

@@ -76,20 +76,23 @@ def test_hilo_entrega_resultados_y_libera_ambos_recursos(crear_mano):
     assert adaptador.obtener_resultado().estado is EstadoVision.DETENIDO
 
 
-def test_fallo_de_camara_se_comunica_y_libera_detector(crear_mano):
+def test_fallo_de_camara_se_comunica_sin_crear_detector(crear_mano):
     class CamaraConFallo(CamaraSimulada):
         def abrir(self):
             raise ErrorCamara("Cámara desconectada")
 
     camara = CamaraConFallo()
     detector = DetectorSimulado(crear_mano())
-    adaptador = AdaptadorVision(crear_camara=lambda: camara, crear_detector=lambda: detector)
+    from unittest.mock import Mock
+    factory = Mock(return_value=detector)
+    adaptador = AdaptadorVision(crear_camara=lambda: camara, crear_detector=factory)
     adaptador.iniciar()
     resultado = esperar_estado(adaptador, EstadoVision.ERROR_CAMARA)
     assert resultado.estado is EstadoVision.ERROR_CAMARA and not resultado.es_valido
     assert resultado.mano is None and not resultado.eventos
     assert adaptador.detener(1)
-    assert camara.cerrada and detector.cerrado
+    assert camara.cerrada
+    factory.assert_not_called()
 
 
 def test_fallo_del_detector_no_deja_camara_abierta(crear_mano):
@@ -331,7 +334,7 @@ def test_error_se_informa_antes_de_un_cierre_nativo_bloqueado(crear_mano):
     liberar_cierre = Event()
 
     class CamaraConFallo(CamaraSimulada):
-        def abrir(self):
+        def leer(self):
             raise ErrorCamara("Cámara desconectada")
 
     class DetectorConCierreLento(DetectorSimulado):
@@ -349,7 +352,7 @@ def test_error_se_informa_antes_de_un_cierre_nativo_bloqueado(crear_mano):
         resultado = esperar_estado(adaptador, EstadoVision.ERROR_CAMARA)
         assert not resultado.camara_disponible and not resultado.mano_detectada
         assert adaptador.en_ejecucion and not adaptador.camara_disponible
-        assert not detector.cerrado and not camara.cerrada
+        assert not detector.cerrado and camara.cerrada
         with pytest.raises(RuntimeError, match="todavía"):
             adaptador.iniciar()
     finally:
@@ -357,6 +360,29 @@ def test_error_se_informa_antes_de_un_cierre_nativo_bloqueado(crear_mano):
         assert adaptador.detener(1)
     assert camara.cerrada and detector.cerrado
     assert adaptador.estado is EstadoVision.ERROR_CAMARA
+
+
+def test_cancelar_apertura_usb_no_crea_detector_ni_lee_camara():
+    from unittest.mock import Mock
+    entered, release = Event(), Event()
+    camera = Mock()
+    def opening():
+        entered.set()
+        assert release.wait(2)
+    camera.abrir.side_effect = opening
+    detector_factory = Mock()
+    adapter = AdaptadorVision(crear_camara=lambda: camera, crear_detector=detector_factory)
+    adapter.iniciar()
+    try:
+        assert entered.wait(1)
+        assert not adapter.detener(.01)
+    finally:
+        release.set()
+        assert adapter.detener(1)
+    detector_factory.assert_not_called()
+    camera.leer.assert_not_called()
+    camera.cerrar.assert_called_once()
+    assert not adapter.camara_disponible
 
 
 def test_camera_worker_continues_with_other_hand_peace_sign(crear_mano):

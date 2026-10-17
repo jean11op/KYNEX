@@ -30,15 +30,19 @@ class CoordinadorControlVision:
         aplicacion: AplicacionControl,
         proveedor: ProveedorVision,
         *,
-        espera_inicio_s: float = 2.0,
+        espera_inicio_s: float = 10.0,
+        espera_cierre_s: float = 10.0,
         reloj: Callable[[], float] = monotonic,
         dormir: Callable[[float], None] = sleep,
     ) -> None:
         if not isfinite(espera_inicio_s) or espera_inicio_s <= 0:
             raise ValueError("La espera de inicio debe ser finita y positiva.")
+        if not isfinite(espera_cierre_s) or espera_cierre_s <= 0:
+            raise ValueError("La espera de cierre debe ser finita y positiva.")
         self._aplicacion = aplicacion
         self._proveedor = proveedor
         self._espera_inicio_s = espera_inicio_s
+        self._espera_cierre_s = espera_cierre_s
         self._reloj = reloj
         self._dormir = dormir
         self._bloqueo = RLock()
@@ -120,7 +124,7 @@ class CoordinadorControlVision:
             self._dormir(min(0.01, max(0.0, limite - self._reloj())))
 
     def _detener_proveedor(self) -> None:
-        if not self._proveedor.detener():
-            raise ErrorControl("El trabajador de visión no terminó; no se puede iniciar otra sesión.")
+        if not self._proveedor.detener(self._espera_cierre_s):
+            raise ErrorControl("La cámara anterior no respondió al cierre. Desconecta y vuelve a conectar esa cámara y pulsa Iniciar de nuevo.")
         while self._proveedor.obtener_resultado() is not None:
             pass

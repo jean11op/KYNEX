@@ -39,19 +39,34 @@ from holocontrol.presentation.main_window import MainWindow as DashboardWindow, 
 from holocontrol.presentation.visuals import HandPreview
 
 
-def seleccionar_camara(preferido: int, seleccion: int = -1) -> int:
-    """Probe cameras without storing images; an explicit selection never falls back."""
-    indices = [seleccion] if seleccion >= 0 else list(dict.fromkeys([preferido, 0, 1, 2, 3]))
-    for indice in indices:
+def detectar_camaras(indices=range(10)) -> tuple[int, ...]:
+    """Check actual frames off the UI thread; always release each device."""
+    disponibles = []
+    for indice in dict.fromkeys(indices):
         camara = CamaraOpenCV(ConfiguracionCamara(indice=indice))
         try:
             camara.abrir()
-            camara.leer()
-            return indice
+            for intento in range(3):
+                try:
+                    camara.leer()
+                    disponibles.append(indice)
+                    break
+                except ErrorCamara:
+                    if intento == 2:
+                        raise
         except ErrorCamara:
-            continue
+            pass
         finally:
             camara.cerrar()
+    return tuple(disponibles)
+
+
+def seleccionar_camara(preferido: int, seleccion: int = -1) -> int:
+    """Probe cameras without storing images; an explicit selection never falls back."""
+    indices = [seleccion] if seleccion >= 0 else list(dict.fromkeys([preferido, *range(10)]))
+    for indice in indices:
+        if detectar_camaras((indice,)):
+            return indice
     raise ErrorCamara('No se encontró una cámara con imagen. Cierra otras aplicaciones que la usen y revisa los permisos de Windows. Puedes elegir otra cámara en Configuración.')
 
 
@@ -164,13 +179,17 @@ class MainWindow(DashboardWindow):
         self.preview_toggle.setText('Mostrar vista de cámara en Inicio')
         self.camera_selector.clear()
         self.camera_selector.addItem('Detectar automáticamente', -1)
-        for indice in range(6):
+        for indice in range(10):
             self.camera_selector.addItem(f'Cámara {indice}', indice)
         seleccion = self.preferences.data.get('camera_selection', -1)
         self.camera_selector.setCurrentIndex(max(0, self.camera_selector.findData(seleccion)))
         self.camera_selector.setEnabled(True)
-        self.camera_hint.setText('La detección automática prueba el índice del perfil y las cámaras 0 a 3. Puedes elegir un índice manual; detén y vuelve a iniciar para aplicar el cambio.')
+        self.camera_hint.setText('Conecta tu cámara USB y pulsa Buscar cámaras. Elige una cámara y pulsa Probar cámara para identificarla. La selección se guarda para el próximo inicio.')
         self.camera_selector.currentIndexChanged.connect(self._guardar_camara)
+        self.camera_scan_button.setEnabled(True)
+        self.camera_scan_button.clicked.connect(self._buscar_camaras)
+        self.camera_test_button.setEnabled(True)
+        self.camera_test_button.clicked.connect(self._probar_camara)
         cb = self.cal_title.parentWidget().layout()
         self.cal_preview = HandPreview()
         self.cal_preview.setMinimumSize(320, 180)
@@ -308,6 +327,24 @@ class MainWindow(DashboardWindow):
     def _guardar_camara(self):
         self.preferences.data['camera_selection'] = self.camera_selector.currentData()
         self.save('Cámara seleccionada. Se usará en el próximo inicio.')
+
+    def _buscar_camaras(self):
+        if self._futuro is not None:
+            return
+        seleccion = self.camera_selector.currentData()
+        indices = list(dict.fromkeys([*range(10), *([seleccion] if seleccion >= 0 else [])]))
+        def buscar():
+            self.componentes.coordinador.detener_control()
+            return detectar_camaras(indices)
+        self.camera_hint.setText('Buscando cámaras con imagen… Se detendrá la sesión actual para liberar la cámara.')
+        self._ejecutar_en_trabajador('buscar cámaras', buscar)
+
+    def _probar_camara(self):
+        if self._futuro is not None:
+            return
+        def detener():
+            self.componentes.coordinador.detener_control()
+        self._ejecutar_en_trabajador('probar cámara', detener)
 
     def refresh(self):
         super().refresh()
@@ -451,20 +488,23 @@ class MainWindow(DashboardWindow):
         seleccion_camara = self.camera_selector.currentData()
 
         def iniciar():
+            # Release the previous session BEFORE probing/opening any device.
+            # Probing a USB camera still owned by the old worker can block its
+            # driver, preventing both the old session's close and the new open.
+            self.componentes.coordinador.detener_control()
             proveedor = self.componentes.proveedor_vision
             if isinstance(proveedor, AdaptadorVision):
                 proveedor.configuracion = ConfiguracionVision(
                     mano_dominante=Lateralidad(perfil.mano_dominante.value)
                 )
                 proveedor.camara = ConfiguracionCamara(
-                    indice=seleccionar_camara(perfil.configuracion.indice_camara, seleccion_camara)
+                    indice=(seleccion_camara if seleccion_camara >= 0 else
+                            seleccionar_camara(perfil.configuracion.indice_camara))
                 )
             proveedor.activar_vista_previa(True)
             if perfil.calibracion is None or vista_previa:
                 proveedor.iniciar()
                 return
-            if estado.estado is EstadoControl.PAUSED:
-                return self.componentes.coordinador.reanudar_control()
             return self.componentes.coordinador.iniciar_control(
                 ancho_pantalla=ancho_fisico, alto_pantalla=alto_fisico
             )
@@ -621,11 +661,29 @@ class MainWindow(DashboardWindow):
     def _ciclo_terminado(self, operacion: str, resultado: object, error: object):
         if error is not None:
             self.feedback.setText(f"{operacion.capitalize()} falló: {error}")
+            if operacion == 'buscar cámaras':
+                self.camera_hint.setText(self.feedback.text())
             if operacion == "cerrar":
                 self._cierre_pendiente = False
         elif operacion == "vista previa":
+            self._inicio_vista_previa = monotonic()
             self.feedback.setText('Cámara en vista previa. El ratón permanece detenido hasta calibrar el perfil.')
             self._sondeo.start()
+        elif operacion == 'buscar cámaras':
+            seleccion = self.camera_selector.currentData()
+            self.camera_selector.blockSignals(True)
+            self.camera_selector.clear()
+            self.camera_selector.addItem('Detectar automáticamente', -1)
+            for indice in resultado:
+                self.camera_selector.addItem(f'Cámara {indice} — disponible', indice)
+            if seleccion >= 0 and seleccion not in resultado:
+                self.camera_selector.addItem(f'Cámara {seleccion} — no disponible', seleccion)
+            self.camera_selector.setCurrentIndex(max(0, self.camera_selector.findData(seleccion)))
+            self.camera_selector.blockSignals(False)
+            mensaje = (f'Se encontraron {len(resultado)} cámaras. Elige una y pulsa Probar cámara.'
+                       if resultado else 'No se encontró una cámara con imagen. Revisa el cable USB, los permisos de Windows y cierra otras aplicaciones que usen la cámara.')
+            self.camera_hint.setText(mensaje)
+            self.feedback.setText(mensaje)
         elif operacion == "error de cámara":
             self.feedback.setText(self._error_vista_previa)
         elif operacion == "iniciar":
@@ -666,6 +724,13 @@ class MainWindow(DashboardWindow):
             self.preview.set_camera_frame(None, active=False)
             self.cal_preview.set_camera_frame(None)
         self._habilitar_controles(True)
+        if operacion in ('buscar cámaras', 'probar cámara'):
+            self._solo_vista_previa = False
+            self.preview.set_camera_frame(None, active=False)
+            self.cal_preview.set_camera_frame(None, active=False)
+        if operacion == 'probar cámara' and error is None and not self._cierre_pendiente:
+            self.navigate(0)
+            self.start_control(vista_previa=True)
         if operacion == 'preparar calibración' and error is None:
             self._esquinas.clear()
             self.start_control(vista_previa=True)
@@ -688,6 +753,8 @@ class MainWindow(DashboardWindow):
     def _habilitar_controles(self, habilitados: bool):
         for boton in (self.start_button, self.pause_button, self.stop_button):
             boton.setEnabled(habilitados)
+        for widget in (self.camera_selector, self.camera_scan_button, self.camera_test_button):
+            widget.setEnabled(habilitados)
 
     def closeEvent(self, event):
         if self._cerrado:

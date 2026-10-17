@@ -238,9 +238,15 @@ class AdaptadorVision:
         mensaje = ""
         try:
             procesador = ProcesadorVision(self.configuracion, self.plantillas)
+            if self._parada.is_set():
+                return
             camara = self._crear_camara()
-            detector = self._crear_detector()
             camara.abrir()
+            if self._parada.is_set():
+                return
+            detector = self._crear_detector()
+            if self._parada.is_set():
+                return
             with self._condicion:
                 self._camara_disponible = not self._parada.is_set()
                 if self._camara_disponible:
@@ -281,7 +287,7 @@ class AdaptadorVision:
                     )
                     # Comunica el fallo antes de cerrar recursos nativos que pueden bloquear.
                     self._publicar(resultado_error)
-            for recurso in (detector, camara):
+            for recurso in (camara, detector):
                 if recurso is not None:
                     try:
                         recurso.cerrar()

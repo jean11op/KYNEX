@@ -7,6 +7,7 @@ import pytest
 from holocontrol.infrastructure.persistence.conexion import BaseDatos
 from holocontrol.bootstrap import crear_nucleo
 from holocontrol.bootstrap import seleccionar_camara
+from holocontrol.bootstrap import detectar_camaras
 from holocontrol.infrastructure.vision.errors import ErrorCamara
 from holocontrol.domain.entities import Calibracion
 from holocontrol.ports.vision.models import (
@@ -42,6 +43,20 @@ def test_seleccion_manual_no_cambia_a_otro_dispositivo(monkeypatch):
     assert constructor.call_count == 1
     assert constructor.call_args.args[0].indice == 2
     camara.cerrar.assert_called_once()
+
+
+def test_busqueda_verifica_imagen_y_espera_arranque_usb(monkeypatch):
+    unavailable, warming, empty = Mock(), Mock(), Mock()
+    unavailable.abrir.side_effect = ErrorCamara('Ocupada')
+    warming.leer.side_effect = [ErrorCamara('Arrancando'), object()]
+    empty.leer.side_effect = ErrorCamara('Sin imagen')
+    constructor = Mock(side_effect=[unavailable, warming, empty])
+    monkeypatch.setattr('holocontrol.bootstrap.CamaraOpenCV', constructor)
+    assert detectar_camaras([0, 1, 1, 7]) == (1,)
+    assert [c.args[0].indice for c in constructor.call_args_list] == [0, 1, 7]
+    assert warming.leer.call_count == 2
+    for camera in (unavailable, warming, empty):
+        camera.cerrar.assert_called_once()
 
 
 class EjecutorSimulado:
